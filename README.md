@@ -37,6 +37,8 @@ an optional real hidden-state path using `Bumblebee`, `Nx`, and `Axon`.
 - [Configuration and Runtime Notes](#configuration-and-runtime-notes)
 - [Roadmap](#roadmap)
 - [Contributing](#contributing)
+- [Credits](#credits)
+- [References](#references)
 - [License](#license)
 
 ## Features
@@ -205,6 +207,16 @@ mix dialyzer
 Contributions should maintain passing tests, `mix credo --strict`, and
 `mix dialyzer` before merge. This repo is research-oriented and welcomes
 targeted improvements to router quality, docs, and integration reliability.
+
+## Credits
+
+The core architecture implemented here is inspired by TRINITY: An Evolved LLM
+Coordinator, which proposes a lightweight, evolutionary router that uses an SLM
+hidden-state to assign both model and role for multi-turn orchestration.[^1]
+
+## References
+
+[^1]: Jinglue Xu, Qi Sun, Peter Schwendeman, Stefan Nielsen, Edoardo Cetin, and Yujin Tang. "TRINITY: An Evolved LLM Coordinator." arXiv:2512.04695, 2026. https://arxiv.org/abs/2512.04695
 
 ## License
 
