@@ -128,39 +128,92 @@ defmodule TrinityCoordinator.Sakana.SVD do
   end
 
   @doc "Decomposes selected tensor entries and records scale-vector spans."
-  def decompose_tensors(tensors) when is_list(tensors) do
+  def decompose_tensors(tensors, opts \\ []) when is_list(tensors) do
+    opts = Keyword.validate!(opts, progress: nil)
+    progress = opts[:progress]
+    total = length(tensors)
+
     tensors
-    |> Enum.map(fn item ->
+    |> Enum.with_index(1)
+    |> Enum.map(fn {item, index} ->
       {path, segments, tensor} = path_segments_and_tensor_from_item!(item)
       count = tensor |> Nx.shape() |> Tuple.to_list() |> Enum.min()
+
+      emit_progress(progress, %{
+        event: :decompose_started,
+        index: index,
+        total: total,
+        path: path,
+        shape: Nx.shape(tensor),
+        type: Nx.type(tensor),
+        singular_values: count
+      })
+
+      {elapsed_us, decomposition} = :timer.tc(fn -> decompose_tensor(tensor) end)
+
+      emit_progress(progress, %{
+        event: :decompose_finished,
+        index: index,
+        total: total,
+        path: path,
+        elapsed_ms: div(elapsed_us, 1000)
+      })
 
       %{
         path: path,
         segments: segments,
         tensor: tensor,
-        decomposition: decompose_tensor(tensor),
+        decomposition: decomposition,
         singular_values: count
       }
     end)
   end
 
   @doc "Reconstructs selected decompositions by consuming scale offsets in order."
-  def reconstruct_tensors(decompositions, scale_offsets) when is_list(decompositions) do
+  def reconstruct_tensors(decompositions, scale_offsets, opts \\ [])
+      when is_list(decompositions) do
+    opts = Keyword.validate!(opts, progress: nil)
+    progress = opts[:progress]
+    total = length(decompositions)
+
     {reconstructed, offset} =
-      Enum.map_reduce(decompositions, 0, fn item, offset ->
+      decompositions
+      |> Enum.with_index(1)
+      |> Enum.map_reduce(0, fn {item, index}, offset ->
         count = item.singular_values
+        next_offset = offset + count
+
+        emit_progress(progress, %{
+          event: :reconstruct_started,
+          index: index,
+          total: total,
+          path: item.path,
+          offset_start: offset,
+          offset_end: next_offset,
+          singular_values: count
+        })
 
         offsets =
           scale_offsets
           |> Nx.slice([offset], [count])
           |> Nx.as_type(Nx.type(item.tensor))
 
-        tensor =
-          item.decomposition
-          |> reconstruct(offsets)
-          |> Nx.as_type(Nx.type(item.tensor))
+        {elapsed_us, tensor} =
+          :timer.tc(fn ->
+            item.decomposition
+            |> reconstruct(offsets)
+            |> Nx.as_type(Nx.type(item.tensor))
+          end)
 
-        {%{path: item.path, segments: Map.get(item, :segments), tensor: tensor}, offset + count}
+        emit_progress(progress, %{
+          event: :reconstruct_finished,
+          index: index,
+          total: total,
+          path: item.path,
+          elapsed_ms: div(elapsed_us, 1000)
+        })
+
+        {%{path: item.path, segments: Map.get(item, :segments), tensor: tensor}, next_offset}
       end)
 
     if offset != Nx.size(scale_offsets) do
@@ -172,10 +225,12 @@ defmodule TrinityCoordinator.Sakana.SVD do
   end
 
   @doc "Decomposes and reconstructs selected tensors with Sakana scale offsets."
-  def adapt_tensors(tensors, scale_offsets) when is_list(tensors) do
+  def adapt_tensors(tensors, scale_offsets, opts \\ []) when is_list(tensors) do
+    opts = Keyword.validate!(opts, progress: nil)
+
     tensors
-    |> decompose_tensors()
-    |> reconstruct_tensors(scale_offsets)
+    |> decompose_tensors(progress: opts[:progress])
+    |> reconstruct_tensors(scale_offsets, progress: opts[:progress])
   end
 
   @doc "Puts adapted tensor entries back into a nested params container."
@@ -300,6 +355,9 @@ defmodule TrinityCoordinator.Sakana.SVD do
   defp path_matches?(_path, nil), do: true
   defp path_matches?(path, filter) when is_function(filter, 1), do: filter.(path)
   defp path_matches?(path, pattern) when is_binary(pattern), do: String.contains?(path, pattern)
+
+  defp emit_progress(nil, _event), do: :ok
+  defp emit_progress(fun, event) when is_function(fun, 1), do: fun.(event)
 
   defp svd_tuple!(tensor, opts) do
     svd = Function.capture(Nx.LinAlg, :svd, 2)

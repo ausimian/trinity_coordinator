@@ -198,12 +198,21 @@ defmodule TrinityCoordinator.Sakana.SVDTest do
   @tag :expensive_qwen_svd
   @tag timeout: 30 * 60 * 1000
   test "fully reconstructs and reinserts all Sakana-selected Qwen SVF tensors on CUDA" do
+    expensive_log("starting full expensive Qwen SVF gate")
     Runtime.put_cuda_backend!()
 
+    expensive_log("loading safetensors router vector from #{@router_vector_path}")
     vector = SVD.load_router_vector!(@router_vector_path)
     split = SVD.split_router_vector(vector, 9216, 1024, 10)
+    expensive_log("loaded router vector shape=#{inspect(Nx.shape(vector))}")
+    expensive_log("split scale_offsets=#{inspect(Nx.shape(split.scale_offsets))}")
+    expensive_log("split head_weights=#{inspect(Nx.shape(split.head_weights))}")
 
+    expensive_log("loading qwen coordinator profile on CUDA")
     assert {:ok, {model_info, _tokenizer}} = SLMProfile.load_profile(:qwen_coordinator)
+    expensive_log("loaded qwen spec hidden_size=#{model_info.spec.hidden_size}")
+
+    expensive_log("selecting Sakana-compatible Qwen tensors")
 
     selected =
       SVD.decomposable_tensor_entries(model_info.params,
@@ -212,16 +221,40 @@ defmodule TrinityCoordinator.Sakana.SVDTest do
 
     selected_shapes = Enum.map(selected, &Nx.shape(&1.tensor))
     selected_types = Enum.map(selected, &Nx.type(&1.tensor))
+    selected_singular_values = SVD.singular_value_count(selected)
 
-    adapted = SVD.adapt_tensors(selected, split.scale_offsets)
+    expensive_log("selected tensor_count=#{length(selected)}")
+    expensive_log("selected singular_value_count=#{selected_singular_values}")
+
+    Enum.with_index(selected, 1)
+    |> Enum.each(fn {entry, index} ->
+      expensive_log(
+        "selected #{index}/#{length(selected)} path=#{entry.path} shape=#{inspect(Nx.shape(entry.tensor))} type=#{inspect(Nx.type(entry.tensor))} singular_values=#{entry.tensor |> Nx.shape() |> Tuple.to_list() |> Enum.min()} backend=#{Runtime.tensor_backend(entry.tensor)}"
+      )
+    end)
+
+    expensive_log("adapting selected tensors with full 9216-offset vector")
+
+    adapted =
+      SVD.adapt_tensors(selected, split.scale_offsets, progress: &expensive_svd_progress/1)
+
+    expensive_log(
+      "adapted tensor_count=#{length(adapted.tensors)} offset_count=#{adapted.offset_count}"
+    )
+
+    expensive_log("reinserting adapted tensors into qwen params tree")
     updated_params = SVD.put_tensor_entries(model_info.params, adapted.tensors)
+    expensive_log("reinserted adapted tensors")
+
+    expensive_log("reselecting updated tensors for verification")
 
     updated =
       SVD.decomposable_tensor_entries(updated_params,
         path_filter: SVD.layer_index_filter([26])
       )
 
-    assert SVD.singular_value_count(selected) == 9216
+    expensive_log("verifying shapes, types, paths, and offset accounting")
+    assert selected_singular_values == 9216
     assert adapted.offset_count == 9216
     assert length(adapted.tensors) == length(selected)
     assert Enum.map(adapted.tensors, & &1.path) == Enum.map(selected, & &1.path)
@@ -231,6 +264,8 @@ defmodule TrinityCoordinator.Sakana.SVDTest do
 
     assert adapted.tensors |> hd() |> Map.fetch!(:tensor) |> Runtime.tensor_backend() =~
              "EXLA.Backend<cuda:"
+
+    expensive_log("finished full expensive Qwen SVF gate")
   end
 
   @tag :qwen
@@ -260,5 +295,33 @@ defmodule TrinityCoordinator.Sakana.SVDTest do
     assert Runtime.tensor_backend(metadata.vector) =~ "EXLA.Backend<cuda:"
     assert Runtime.tensor_backend(route.logits) =~ "EXLA.Backend<cuda:"
     assert Nx.shape(route.logits) == {1, 10}
+  end
+
+  defp expensive_svd_progress(%{event: :decompose_started} = event) do
+    expensive_log(
+      "decompose start #{event.index}/#{event.total} path=#{event.path} shape=#{inspect(event.shape)} type=#{inspect(event.type)} singular_values=#{event.singular_values}"
+    )
+  end
+
+  defp expensive_svd_progress(%{event: :decompose_finished} = event) do
+    expensive_log(
+      "decompose done #{event.index}/#{event.total} path=#{event.path} elapsed_ms=#{event.elapsed_ms}"
+    )
+  end
+
+  defp expensive_svd_progress(%{event: :reconstruct_started} = event) do
+    expensive_log(
+      "reconstruct start #{event.index}/#{event.total} path=#{event.path} offset_span=#{event.offset_start}..#{event.offset_end} singular_values=#{event.singular_values}"
+    )
+  end
+
+  defp expensive_svd_progress(%{event: :reconstruct_finished} = event) do
+    expensive_log(
+      "reconstruct done #{event.index}/#{event.total} path=#{event.path} elapsed_ms=#{event.elapsed_ms}"
+    )
+  end
+
+  defp expensive_log(message) do
+    IO.puts("[expensive_qwen_svd] #{message}")
   end
 end

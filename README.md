@@ -37,6 +37,7 @@ external model.
 ## Contents
 
 - [Research Context](#research-context)
+- [Active Direction](#active-direction)
 - [Current Status](#current-status)
 - [Requirements](#requirements)
 - [GPU Setup](#gpu-setup)
@@ -66,16 +67,69 @@ now follows:
 - The head is a lightweight linear projection by default.
 - Role routing matters: Thinker plans, Worker executes, Verifier emits
   `ACCEPT` or `REVISE`.
-- The full paper favors sep-CMA-ES for terminal reward optimization, while the
-  appendix also describes a supervised frozen-SLM path. This repo now includes a
-  terminal-reward sep-CMA-ES core with deterministic codec/recombination,
-  stop gates, and explicit provider-gated trajectory mode.
+- The paper's full training story includes label-free terminal reward
+  optimization. That remains important, but this repo is no longer trying to
+  reproduce that experiment first. The active buildout is the usable coordinator
+  system: load the Qwen-class coordinator in Elixir, import Sakana-provided
+  artifacts, route through the adapted coordinator/head path, and make the whole
+  path observable and testable on GPU.
+
+## Active Direction
+
+The current direction is artifact-first TRINITY coordinator bring-up in Elixir.
+The goal is to build a usable system from the concrete resources we have, not to
+start by reproducing Sakana's full training run.
+
+Active path:
+
+- Run `Qwen/Qwen3-0.6B` directly through `Bumblebee.Text.Qwen3` on
+  `{EXLA.Backend, client: :cuda}`.
+- Extract real Qwen hidden-state vectors through the same
+  `Extractor`/`CoordinationHead` contract used by the tiny test profile.
+- Convert Sakana's router ES vector artifact into safetensors so the Elixir
+  runtime can load it without Python at application runtime.
+- Split that vector into the exact inspected layout:
+  - first `9216` values: SVF scale offsets for the selected Qwen tensor set
+  - final `10240` values: router head weights reshaped to `{10, 1024}`
+- Load the router head weights into the existing Axon routing head and route a
+  real Qwen hidden vector through it.
+- Implement the SVD/SVF mechanics in Elixir/Nx:
+  - deterministic tensor selection
+  - singular-value counting
+  - Sakana normalization
+  - adapted tensor reconstruction
+  - params-container reinsertion using preserved path segments
+- Keep full expensive Qwen SVF reconstruction as an explicit opt-in gate, not a
+  default `mix test` path.
+
+Deferred path:
+
+- Reproducing the actual Sakana training process end to end is deferred.
+- The sep-CMA-ES implementation remains in the repo as a foundation and as a
+  later route to experiment reproduction.
+- Full reproduction work still needs task datasets, terminal reward plumbing,
+  repeated trajectory evaluation, budget controls, and comparison against paper
+  metrics.
+- The immediate work is not to regenerate Sakana's weights. The immediate work
+  is to correctly consume and apply the available artifacts and make the
+  resulting coordinator operational.
+
+This means the next milestones are integration and parity milestones, not
+training-reproduction milestones:
+
+- prove the imported Qwen/Sakana head path on CUDA,
+- apply SVF-adapted tensors into the Bumblebee params tree,
+- compare Elixir/Nx outputs against the Python reference path where practical,
+- expose this coordinator path through demo/orchestrator commands,
+- persist traces showing profile, backend, vector shape, logits shape, selected
+  agent, and selected role.
 
 ## Current Status
 
 Implemented and tested:
 
-- `Runtime`: checks EXLA-supported platforms and sets CUDA as the Nx backend.
+- `Runtime`: checks EXLA-supported platforms and provides scoped CUDA backend
+  helpers without leaking global Nx backend state across tests.
 - `Extractor`: formats transcripts, loads a real SLM/tokenizer, runs a real
   forward pass, extracts the final hidden-state tensor, and slices the
   second-to-last token vector.
@@ -86,13 +140,32 @@ Implemented and tested:
   vector, injects the selected role, and dispatches to the provider boundary.
 - `mix trinity.demo`: prints a complete, step-by-step GPU-backed demonstration.
 - `sep-CMA-ES trainer`: deterministic codec/recombination loop, terminal-reward
-  objective, and explicit provider-gated trajectory mode.
+  objective, and explicit provider-gated trajectory mode. This is now deferred
+  reproduction infrastructure rather than the active mainline.
+- `SLMProfile.qwen_coordinator/0`: loads `Qwen/Qwen3-0.6B` through the pinned
+  upstream Bumblebee Qwen3 implementation on CUDA with `bf16` params.
+- `TrinityCoordinator.Sakana.SVD`: loads the Sakana safetensors vector, splits
+  the `9216 + 10240` layout, implements SVD/SVF reconstruction mechanics, loads
+  the imported head into Axon, and supports adapted tensor reinsertion.
+- `Trace.JSONL` and `Trace.Hash`: serialize tensors by preserving original
+  backend labels while hashing host-transferred tensor values, avoiding EXLA
+  donated-buffer flakes.
 
 The integration tests use `hf-internal-testing/tiny-random-gpt2` because it is
 small enough for repeatable CI/local verification. It proves the mechanics with
 a 32-dimensional hidden state. The paper-scale target is a Qwen-class SLM with
 1024-dimensional hidden states; the same extractor/head API is dimension-driven
 and builds the head from the observed vector width.
+
+The Qwen/Sakana path is also tested directly:
+
+- Qwen loads on CUDA and exposes a real `{1, 1024}` hidden vector.
+- The selected layer-26 Qwen tensor set consumes exactly `9216` SVF offsets.
+- The imported router head reshapes to `{10, 1024}` and routes through the real
+  Axon head.
+- A real Qwen hidden vector routes through the imported Sakana head on CUDA.
+- The full `9216`-offset SVD reconstruction/import gate exists as an explicit
+  long-running test.
 
 ## Requirements
 
@@ -133,8 +206,8 @@ The Qwen profile gate applies to profile selection:
 
 - `qwen_coordinator` is expected to load successfully on GPU-backed EXLA.
 - do not treat CPU-only Qwen runs as passing the production profile gate.
-- do not claim Sakana-weight parity until the SVD/SVF and router-head artifacts
-  are imported and compared against the Python reference path.
+- do not claim full Sakana parity until the SVF-adapted Qwen params and router
+  outputs are compared against the Python reference path.
 
 ## GPU Setup
 
@@ -197,30 +270,30 @@ This is the fastest way to verify that the local stack is actually using
 Load a small SLM, extract the hidden-state vector, train a tiny head, and route:
 
 ```elixir
-TrinityCoordinator.Runtime.put_cuda_backend!()
+TrinityCoordinator.Runtime.with_cuda_backend!(fn ->
+  {:ok, {model_info, tokenizer}} =
+    TrinityCoordinator.Extractor.load_slm_model(
+      {:hf, "hf-internal-testing/tiny-random-gpt2"},
+      Bumblebee.Text.Gpt2,
+      :base
+    )
 
-{:ok, {model_info, tokenizer}} =
-  TrinityCoordinator.Extractor.load_slm_model(
-    {:hf, "hf-internal-testing/tiny-random-gpt2"},
-    Bumblebee.Text.Gpt2,
-    :base
-  )
+  messages = [%{role: "user", content: "Find a strategy for a short proof."}]
 
-messages = [%{role: "user", content: "Find a strategy for a short proof."}]
+  {:ok, metadata} =
+    TrinityCoordinator.Extractor.extract_penultimate_hidden_state_with_metadata(
+      model_info,
+      tokenizer,
+      messages
+    )
 
-{:ok, metadata} =
-  TrinityCoordinator.Extractor.extract_penultimate_hidden_state_with_metadata(
-    model_info,
-    tokenizer,
-    messages
-  )
+  model = TrinityCoordinator.CoordinationHead.build_model(32, 3, 3)
+  {init_fn, _predict_fn} = Axon.build(model)
+  params = init_fn.(Nx.template({1, 32}, :f32), Axon.ModelState.empty())
 
-model = TrinityCoordinator.CoordinationHead.build_model(32, 3, 3)
-{init_fn, _predict_fn} = Axon.build(model)
-params = init_fn.(Nx.template({1, 32}, :f32), Axon.ModelState.empty())
-
-route = TrinityCoordinator.CoordinationHead.route(model, params, metadata.vector, 3, 3)
-{route.agent_id, route.role_id}
+  route = TrinityCoordinator.CoordinationHead.route(model, params, metadata.vector, 3, 3)
+  {route.agent_id, route.role_id}
+end)
 ```
 
 For supervised head training:
@@ -271,7 +344,8 @@ trained_state =
 
 ### `TrinityCoordinator.Runtime`
 
-CUDA visibility and backend setup helpers.
+CUDA visibility and scoped backend setup helpers. Runtime code uses
+process-local backend selection instead of global Nx mutation.
 
 ### `TrinityCoordinator.Extractor`
 
@@ -298,6 +372,25 @@ OpenAI-compatible and expects `OPENAI_API_KEY` or `openai_api_key: ...`.
 Provider pool management with normalized runtime specs, validation, and explicit
 pool selection. Use a named pool to control which providers are available.
 
+### `TrinityCoordinator.SLMProfile`
+
+Named coordinator model profiles. The production-intent profile is
+`:qwen_coordinator`, which loads `Qwen/Qwen3-0.6B` through
+`Bumblebee.Text.Qwen3` on CUDA.
+
+### `TrinityCoordinator.Sakana.SVD`
+
+Sakana artifact import and SVD/SVF mechanics:
+
+- loads `priv/sakana_trinity/artifacts/trinity_router_es_vector.safetensors`,
+- reads tensor `trinity_router_es_vector`,
+- splits SVF scale offsets and router head weights,
+- selects Qwen tensors with Sakana-compatible matrix rules,
+- counts singular values deterministically,
+- reconstructs adapted tensors with Sakana's normalization formula,
+- reinserts adapted tensors into nested Bumblebee params containers,
+- loads imported head weights into the Axon routing head.
+
 ## Testing
 
 Fast tests:
@@ -306,12 +399,30 @@ Fast tests:
 XLA_TARGET=cuda12 mix test
 ```
 
+This excludes `:integration` and `:expensive_qwen_svd` by default.
+
 Integration tests load the tiny Hugging Face model and assert CUDA-backed
 tensors where applicable:
 
 ```bash
 XLA_TARGET=cuda12 mix test --only integration
 ```
+
+Qwen/Sakana focused gates:
+
+```bash
+XLA_TARGET=cuda12 mix test --only qwen --trace
+XLA_TARGET=cuda12 mix test test/trinity_coordinator/sakana/svd_test.exs --only qwen --exclude expensive_qwen_svd --trace
+```
+
+Full opt-in SVF reconstruction/import gate:
+
+```bash
+XLA_TARGET=cuda12 mix test test/trinity_coordinator/sakana/svd_test.exs --only expensive_qwen_svd --trace
+```
+
+That gate performs the full selected Qwen SVD/SVF reconstruction path and can
+take minutes. It is intentionally excluded from plain `mix test`.
 
 Provider calls are not silently simulated in core tests. Without credentials,
 provider-boundary tests assert the real adapter returns
@@ -352,11 +463,18 @@ XLA_TARGET=cuda12 mix docs
 
 ## Roadmap
 
-- Extend the Qwen-class coordinator path from GPU-backed hidden-state extraction
-  into Sakana artifact import, adapted-weight loading, and route-logit parity. See
+- Finish the active Qwen/Sakana artifact lane: run and characterize the full
+  expensive `9216`-offset SVF reconstruction gate, apply adapted tensors in the
+  runtime Qwen coordinator path, and compare Elixir/Nx outputs against the
+  Python reference where practical. See
+  [Elixir-Native SVD Decomposition For TRINITY](docs/elixir_svd_decomposition.md).
+- Expose the imported Qwen/Sakana coordinator through demo/orchestrator
+  commands, including profile selection, backend metadata, vector shape, logits
+  shape, selected agent, and selected role. See
   [Production Qwen SLM Profile](docs/production_qwen_slm_profile.md).
-- Implement sep-CMA-ES training for terminal binary rewards, matching the
-  paper's label-free optimization path. See
+- Preserve the sep-CMA-ES training implementation as deferred reproduction
+  infrastructure. Full paper-style label-free training is not the current
+  mainline; resume it after artifact import/parity is stable. See
   [sep-CMA-ES Training For Terminal Rewards](docs/sep_cma_es_training.md).
 - Add block-diagonal and sparse head variants from the appendix for parameter
   efficiency and ablation work. See
