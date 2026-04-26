@@ -100,6 +100,14 @@ is true:
 Do not merge a profile that aliases Qwen to another architecture unless the
 full validation matrix below passes on the target model.
 
+Current local probe status:
+
+- `test/trinity_coordinator/slm_profile_test.exs` includes an `@tag :qwen`
+  probe that asserts the current profile path returns
+  `{:error, {:unsupported_profile, :qwen_coordinator}}`.
+- That keeps the blocker explicit and prevents accidental aliasing to another
+  architecture.
+
 ## Model Selection Checklist
 
 Maintain and update this checklist as the profile work progresses. Before adding
@@ -269,15 +277,15 @@ explicit production profile.
 Maintain this checklist in the implementation PR or working tree and revise it
 as dependency support, model choice, or profile API details change.
 
-- [ ] Red: add a metadata test for the current tiny profile.
-- [ ] Green: introduce `SLMProfile.tiny_gpt2/0` without changing behavior.
-- [ ] Red: add a metadata test for the Qwen profile.
-- [ ] Green: add `SLMProfile.qwen_coordinator/0` with repository, module,
+- [x] Red: add a metadata test for the current tiny profile.
+- [x] Green: introduce `SLMProfile.tiny_gpt2/0` without changing behavior.
+- [x] Red: add a metadata test for the Qwen profile.
+- [x] Green: add `SLMProfile.qwen_coordinator/0` with repository, module,
       architecture, hidden-size, and CUDA-target metadata.
-- [ ] Red: add a loader test for profile-based model loading using tiny GPT-2.
-- [ ] Green: implement `SLMProfile.load_profile/1`.
-- [ ] Red: add Qwen compatibility probe or `@tag :qwen` model-load test.
-- [ ] Green: resolve dependency/module support without breaking tiny-profile
+- [x] Red: add a loader test for profile-based model loading using tiny GPT-2.
+- [x] Green: implement `SLMProfile.load_profile/1`.
+- [x] Red: add Qwen compatibility probe or `@tag :qwen` model-load test.
+- [x] Green: resolve dependency/module support without breaking tiny-profile
       integration tests.
 - [ ] Red: add Qwen hidden-state extraction test requiring CUDA backend.
 - [ ] Green: extract the Qwen second-to-last token vector.
