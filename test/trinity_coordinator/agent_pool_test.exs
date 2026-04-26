@@ -2,21 +2,25 @@ defmodule TrinityCoordinator.AgentPoolTest do
   use ExUnit.Case
   alias TrinityCoordinator.AgentPool
 
-  test "calls agent and returns response" do
-    messages = [%{role: "user", content: "Hi"}]
-    {:ok, response} = AgentPool.call_agent(0, messages)
+  defmodule TestAdapter do
+    @behaviour TrinityCoordinator.AgentPool.Adapter
 
-    assert response == "This is a mocked response from gpt-4."
+    @impl true
+    def call(_spec, messages, _opts) do
+      {:ok, "Test adapter response for #{length(messages)} messages"}
+    end
   end
 
-  test "verifier agent can return ACCEPT or REVISE" do
-    messages = [
-      %{role: "system", content: "Check the current solution. Output ACCEPT..."},
-      %{role: "user", content: "Hi"}
-    ]
+  test "returns a mapped response from a provider adapter" do
+    messages = [%{role: "user", content: "Hi"}]
+    {:ok, response} = AgentPool.call_agent(0, messages, adapter: TestAdapter)
 
-    {:ok, response} = AgentPool.call_agent(1, messages)
+    assert response == "Test adapter response for 1 messages"
+  end
 
-    assert response in ["ACCEPT", "REVISE"]
+  test "unknown agent ids fail fast" do
+    messages = [%{role: "user", content: "Hi"}]
+
+    assert {:error, {:unknown_agent, 99}} = AgentPool.call_agent(99, messages, adapter: TestAdapter)
   end
 end

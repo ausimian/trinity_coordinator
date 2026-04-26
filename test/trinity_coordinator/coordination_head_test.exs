@@ -8,15 +8,13 @@ defmodule TrinityCoordinator.CoordinationHeadTest do
     num_roles = 2
 
     model = CoordinationHead.build_model(input_dim, num_agents, num_roles)
-
-    # Initialize random parameters (weights/biases) for our dense layer
     {init_fn, _predict_fn} = Axon.build(model)
     params = init_fn.(Nx.template({1, input_dim}, :f32), Axon.ModelState.empty())
 
     # Create a dummy input tensor {batch_size=1, hidden_dim=10}
     tensor = Nx.broadcast(0.5, {1, input_dim})
 
-    {agent_id, role_id} = CoordinationHead.forward(params, tensor, num_agents, num_roles)
+    {agent_id, role_id} = CoordinationHead.forward(model, params, tensor, num_agents, num_roles)
 
     # We can't know the exact predicted ID since weights are random,
     # but we can ensure they fall within the correct index bounds.

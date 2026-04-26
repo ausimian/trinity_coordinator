@@ -1,33 +1,70 @@
 defmodule TrinityCoordinator.AgentPool do
   @moduledoc """
-  Executes HTTP requests to the selected Agent (LLM).
+  Provider dispatch for selected coordinator agents.
+
+  The orchestrator depends on this module for real LLM calls.
   """
 
   @agents %{
-    0 => "gpt-4",
-    1 => "claude-3-5-sonnet",
-    2 => "gemini-pro",
-    3 => "deepseek-coder",
-    4 => "llama-3-8b"
+    0 => %{provider: :openai, model: "gpt-4o-mini"},
+    1 => %{provider: :openai, model: "claude-3-5-sonnet"},
+    2 => %{provider: :openai, model: "gemini-1.5-flash"},
+    3 => %{provider: :openai, model: "deepseek-chat"},
+    4 => %{provider: :openai, model: "llama-3.1-70b"}
   }
 
+  defstruct [:agent_id, :provider, :model, :messages, :response]
+
   @doc """
-  Mocks a call to an LLM provider based on the chosen agent_id.
-  In a real scenario, this uses Req to hit the respective API.
+  Routes the message list to the mapped provider for the selected agent.
   """
-  def call_agent(agent_id, messages) do
-    agent_name = Map.get(@agents, agent_id, "unknown-model")
-
-    system_msg = Enum.find(messages, &(&1[:role] == "system" or &1.role == "system"))
-
-    # If it's a Verifier, it outputs ACCEPT 30% of the time, else REVISE
-    response_text =
-      if system_msg && Map.get(system_msg, :content, "") =~ "ACCEPT" do
-        if :rand.uniform() > 0.7, do: "ACCEPT", else: "REVISE"
-      else
-        "This is a mocked response from #{agent_name}."
-      end
-
-    {:ok, response_text}
+  def call_agent(agent_id, messages, opts \\ []) do
+    with {:ok, messages} <- normalize_messages(messages),
+         {:ok, spec} <- fetch_agent_spec(agent_id),
+         {:ok, adapter} <- adapter_for(spec.provider, opts),
+         {:ok, response} <-
+           adapter.call(spec, messages, opts) do
+      {:ok, response}
+    else
+      {:error, reason} -> {:error, reason}
+    end
   end
+
+  defp fetch_agent_spec(agent_id) when is_integer(agent_id) do
+    case @agents[agent_id] do
+      nil -> {:error, {:unknown_agent, agent_id}}
+      spec -> {:ok, spec}
+    end
+  end
+
+  defp adapter_for(provider, opts) do
+    case Keyword.get(opts, :adapter) do
+      nil -> adapter_from_provider(provider)
+      adapter -> {:ok, adapter}
+    end
+  end
+
+  defp adapter_from_provider(:openai), do: {:ok, TrinityCoordinator.AgentPool.OpenAI}
+  defp adapter_from_provider(_), do: {:error, :unsupported_provider}
+
+  defp normalize_messages(messages) when is_list(messages) do
+    normalized =
+      Enum.map(messages, fn message ->
+        role = Map.get(message, :role, Map.get(message, "role"))
+        content = Map.get(message, :content, Map.get(message, "content"))
+
+    if is_binary(role) and is_binary(content) do
+      %{role: role, content: content}
+    else
+      {:error, {:invalid_message, message}}
+    end
+      end)
+
+    case Enum.find(normalized, &match?({:error, _}, &1)) do
+      nil -> {:ok, normalized}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp normalize_messages(_), do: {:error, :invalid_messages}
 end

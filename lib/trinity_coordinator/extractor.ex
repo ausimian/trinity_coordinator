@@ -1,38 +1,33 @@
 defmodule TrinityCoordinator.Extractor do
   @moduledoc """
-  Handles extracting specific information from the Small Language Model's outputs.
+  Extracts routing-relevant hidden-state tensors from a coordinator model.
   """
-  import Nx.Defn
 
   @default_slm_repo {:hf, "hf-internal-testing/tiny-random-gpt2"}
   @default_slm_architecture :base
   @default_slm_module Bumblebee.Text.Gpt2
 
   @doc """
-  Extracts the hidden state vector corresponding to the second-to-last token
-  in the sequence. The input is expected to be a tensor of shape:
-  {batch_size, sequence_length, hidden_dimension}.
+  Extracts the hidden state vector corresponding to the second-to-last token.
+
+  If the sequence length is 1, the final token is used as a safe fallback.
   """
-  defn extract_penultimate_hidden_state(hidden_states) do
-    # Ensure it's a tensor (if a tuple is passed, take the last layer)
-    # However, defn requires all inputs to be numerical/tensors.
-    # We assume the caller passes the final layer's tensor.
+  def extract_penultimate_hidden_state(hidden_states) when is_struct(hidden_states, Nx.Tensor) do
+    shape = Nx.shape(hidden_states)
 
-    {batch, seq_len, hidden_dim} = Nx.shape(hidden_states)
+    case shape do
+      {batch, seq_len, hidden_dim} ->
+        index = if seq_len <= 1, do: 0, else: seq_len - 2
+        sliced = Nx.slice(hidden_states, [0, index, 0], [batch, 1, hidden_dim])
+        Nx.squeeze(sliced, axes: [1])
 
-    # We want to slice starting at token index `seq_len - 2`
-    # and we want exactly 1 token.
-    sliced = Nx.slice(hidden_states, [0, seq_len - 2, 0], [batch, 1, hidden_dim])
-
-    # Remove the sequence_length dimension to return {batch, hidden_dim}
-    Nx.squeeze(sliced, axes: [1])
+      _ ->
+        {:error, :invalid_hidden_shape}
+    end
   end
 
   @doc """
-  Loads a lightweight SLM and tokenizer for real hidden-state extraction.
-
-  The defaults are intentionally tiny so this can run as a smoke test in local
-  environments; swap these options for your target SLM repository and module.
+  Loads an SLM and tokenizer.
   """
   def load_slm_model(
         slm_repo \\ @default_slm_repo,
@@ -47,8 +42,7 @@ defmodule TrinityCoordinator.Extractor do
   end
 
   @doc """
-  Runs one non-generative forward pass and returns the penultimate token's hidden
-  state vector suitable for routing.
+  Extracts the penultimate hidden-state vector from structured message transcripts.
   """
   def extract_penultimate_hidden_state_from_messages(
         messages,
@@ -62,63 +56,105 @@ defmodule TrinityCoordinator.Extractor do
   end
 
   @doc """
-  Runs one non-generative forward pass and returns the penultimate token's hidden
-  state vector suitable for routing.
+  Extracts the penultimate hidden-state vector from preloaded model/tokenizer objects.
   """
   def extract_penultimate_hidden_state_from_texts(model_info, tokenizer, messages) do
-    transcript = format_messages(messages)
-    inputs = Bumblebee.apply_tokenizer(tokenizer, transcript)
-    outputs = Axon.predict(model_info.model, model_info.params, inputs)
-    hidden_states = extract_hidden_states(outputs)
-
-    hidden_state = extract_last_layer_hidden_state(hidden_states)
-
-    if hidden_state == nil do
-      {:error, :missing_hidden_state}
+    with {:ok, transcript} <- format_messages(messages),
+         inputs <- Bumblebee.apply_tokenizer(tokenizer, transcript),
+         outputs <- Axon.predict(model_info.model, model_info.params, inputs),
+         {:ok, hidden_states} <- extract_hidden_states(outputs),
+         {:ok, hidden_state} <- extract_last_layer_hidden_state(hidden_states),
+         {:ok, penultimate} <- extract_penultimate_vector(hidden_state) do
+      {:ok, penultimate}
     else
-      {:ok, extract_penultimate_hidden_state(hidden_state)}
+      {:error, reason} -> {:error, reason}
     end
   end
 
-  defp extract_hidden_states(outputs) do
-    Map.get(outputs, :hidden_state, Map.get(outputs, "hidden_state")) ||
-      Map.get(outputs, :hidden_states, Map.get(outputs, "hidden_states"))
-  end
-
-  defp extract_last_layer_hidden_state(hidden_states) do
-    case hidden_states do
-      tensor = %Nx.Tensor{} ->
-        tensor
-
-      {_, _} = tuple when is_tuple(tuple) ->
-        tuple
-        |> Tuple.to_list()
-        |> Enum.find_value(fn
-          %Axon.None{} -> nil
-          value -> value
-        end)
-
-      layers when is_list(layers) ->
-        layers
-        |> Enum.reverse()
-        |> Enum.find_value(fn
-          %Axon.None{} -> nil
-          value -> value
-        end)
-
-      _ ->
-        nil
+  defp extract_penultimate_vector(hidden_state) do
+    case extract_penultimate_hidden_state(hidden_state) do
+      {:error, reason} -> {:error, reason}
+      value -> {:ok, value}
     end
   end
+
+  defp extract_hidden_states(outputs) when is_map(outputs) do
+    cond do
+      has_tensor?(outputs[:hidden_state]) -> {:ok, outputs[:hidden_state]}
+      has_tensor?(outputs["hidden_state"]) -> {:ok, outputs["hidden_state"]}
+      has_tensor?(outputs[:hidden_states]) -> {:ok, outputs[:hidden_states]}
+      has_tensor?(outputs["hidden_states"]) -> {:ok, outputs["hidden_states"]}
+      true -> {:error, :missing_hidden_state}
+    end
+  end
+
+  defp extract_hidden_states(_), do: {:error, :missing_hidden_state}
+
+  defp has_tensor?(%Axon.None{}), do: false
+  defp has_tensor?(tensor) when is_struct(tensor, Nx.Tensor), do: true
+  defp has_tensor?(_), do: false
+
+  defp extract_last_layer_hidden_state(hidden_states) when is_struct(hidden_states, Nx.Tensor) do
+    {:ok, hidden_states}
+  end
+
+  defp extract_last_layer_hidden_state(hidden_states) when is_tuple(hidden_states) do
+    hidden_states
+    |> Tuple.to_list()
+    |> Enum.reverse()
+    |> Enum.find_value(:no_layer, fn
+      %Axon.None{} -> nil
+      %Nx.Tensor{} = layer -> layer
+      _ -> nil
+    end)
+    |> case do
+      nil -> {:error, :missing_hidden_state}
+      :no_layer -> {:error, :missing_hidden_state}
+      value -> {:ok, value}
+    end
+  end
+
+  defp extract_last_layer_hidden_state(hidden_states) when is_list(hidden_states) do
+    hidden_states
+    |> Enum.reverse()
+    |> Enum.find_value(:no_layer, fn
+      %Axon.None{} -> nil
+      %Nx.Tensor{} = layer -> layer
+      _ -> nil
+    end)
+    |> case do
+      nil -> {:error, :missing_hidden_state}
+      :no_layer -> {:error, :missing_hidden_state}
+      value -> {:ok, value}
+    end
+  end
+
+  defp extract_last_layer_hidden_state(_), do: {:error, :missing_hidden_state}
 
   defp format_messages(messages) when is_list(messages) do
-    messages
-    |> Enum.map_join("\n", fn message ->
-      role = Map.get(message, "role", Map.get(message, :role, "unknown"))
-      content = Map.get(message, "content", Map.get(message, :content, ""))
-      "#{role}: #{content}"
-    end)
+    formatted =
+      Enum.reduce_while(messages, [], fn message, acc ->
+        role = Map.get(message, :role, Map.get(message, "role"))
+        content = Map.get(message, :content, Map.get(message, "content"))
+
+        if is_binary(role) and is_binary(content) do
+          {:cont, [{role, content} | acc]}
+        else
+          {:halt, {:error, {:invalid_messages, "invalid message entry: #{inspect(message)}"}}}
+        end
+      end)
+
+    case formatted do
+      {:error, reason} -> {:error, reason}
+      _ ->
+        formatted_strings =
+          formatted
+          |> Enum.reverse()
+          |> Enum.map_join("\n", fn {role, content} -> "#{role}: #{content}" end)
+
+        {:ok, formatted_strings}
+    end
   end
 
-  defp format_messages(_), do: ""
+  defp format_messages(_), do: {:error, :invalid_messages}
 end
