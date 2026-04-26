@@ -74,9 +74,9 @@ defmodule TrinityCoordinator.MixProject do
       main: "readme",
       source_ref: "v#{@version}",
       source_url: "https://github.com/nshkrdotcom/trinity_coordinator",
-      extras: ["CHANGELOG.md", "README.md"],
+      extras: ["CHANGELOG.md", "README.md", "docs/production_qwen_slm_profile.md"],
       groups_for_extras: [
-        Guides: ~r/README/
+        Guides: ~r/README|production_qwen_slm_profile/
       ],
       groups_for_modules: [
         Core: [

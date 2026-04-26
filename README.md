@@ -303,7 +303,8 @@ XLA_TARGET=cuda12 mix docs
 ## Roadmap
 
 - Add a production SLM profile for a Qwen-class coordinator model once the
-  Bumblebee/Nx dependency lane supports it cleanly on this host.
+  Bumblebee/Nx dependency lane supports it cleanly on this host. See
+  [Production Qwen SLM Profile](docs/production_qwen_slm_profile.md).
 - Implement sep-CMA-ES training for terminal binary rewards, matching the
   paper's label-free optimization path.
 - Add block-diagonal and sparse head variants from the appendix for parameter
