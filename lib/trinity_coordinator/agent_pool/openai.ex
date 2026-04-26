@@ -10,7 +10,14 @@ defmodule TrinityCoordinator.AgentPool.OpenAI do
   @impl true
   def call(agent_spec, messages, opts) do
     api_key = Keyword.get(opts, :openai_api_key, System.get_env("OPENAI_API_KEY"))
-    base_url = Keyword.get(opts, :openai_base_url, System.get_env("TRINITY_OPENAI_BASE_URL", @default_base_url))
+
+    base_url =
+      Keyword.get(
+        opts,
+        :openai_base_url,
+        System.get_env("TRINITY_OPENAI_BASE_URL", @default_base_url)
+      )
+
     timeout = Keyword.get(opts, :openai_timeout_ms, 30_000)
 
     with :ok <- validate_api_key(api_key),
@@ -49,7 +56,8 @@ defmodule TrinityCoordinator.AgentPool.OpenAI do
     end
   end
 
-  defp parse_response(%{"choices" => [%{"message" => %{"content" => response}} | _]}) when is_binary(response) do
+  defp parse_response(%{"choices" => [%{"message" => %{"content" => response}} | _]})
+       when is_binary(response) do
     {:ok, response}
   end
 

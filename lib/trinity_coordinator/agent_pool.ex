@@ -7,10 +7,12 @@ defmodule TrinityCoordinator.AgentPool do
 
   @agents %{
     0 => %{provider: :openai, model: "gpt-4o-mini"},
-    1 => %{provider: :openai, model: "claude-3-5-sonnet"},
-    2 => %{provider: :openai, model: "gemini-1.5-flash"},
-    3 => %{provider: :openai, model: "deepseek-chat"},
-    4 => %{provider: :openai, model: "llama-3.1-70b"}
+    1 => %{provider: :openai, model: "gpt-4o-mini"},
+    2 => %{provider: :openai, model: "gpt-4o-mini"},
+    3 => %{provider: :openai, model: "gpt-4o-mini"},
+    4 => %{provider: :openai, model: "gpt-4o-mini"},
+    5 => %{provider: :openai, model: "gpt-4o-mini"},
+    6 => %{provider: :openai, model: "gpt-4o-mini"}
   }
 
   defstruct [:agent_id, :provider, :model, :messages, :response]
@@ -20,7 +22,7 @@ defmodule TrinityCoordinator.AgentPool do
   """
   def call_agent(agent_id, messages, opts \\ []) do
     with {:ok, messages} <- normalize_messages(messages),
-         {:ok, spec} <- fetch_agent_spec(agent_id),
+         {:ok, spec} <- fetch_agent_spec(agent_id, opts),
          {:ok, adapter} <- adapter_for(spec.provider, opts),
          {:ok, response} <-
            adapter.call(spec, messages, opts) do
@@ -30,8 +32,20 @@ defmodule TrinityCoordinator.AgentPool do
     end
   end
 
-  defp fetch_agent_spec(agent_id) when is_integer(agent_id) do
-    case @agents[agent_id] do
+  @doc """
+  Returns the default provider-pool specification.
+  """
+  def agent_specs, do: @agents
+
+  @doc """
+  Returns the number of default provider-pool agents.
+  """
+  def agent_count, do: map_size(@agents)
+
+  defp fetch_agent_spec(agent_id, opts) when is_integer(agent_id) do
+    agents = Keyword.get(opts, :agents, @agents)
+
+    case agents[agent_id] do
       nil -> {:error, {:unknown_agent, agent_id}}
       spec -> {:ok, spec}
     end
@@ -53,11 +67,11 @@ defmodule TrinityCoordinator.AgentPool do
         role = Map.get(message, :role, Map.get(message, "role"))
         content = Map.get(message, :content, Map.get(message, "content"))
 
-    if is_binary(role) and is_binary(content) do
-      %{role: role, content: content}
-    else
-      {:error, {:invalid_message, message}}
-    end
+        if is_binary(role) and is_binary(content) do
+          %{role: role, content: content}
+        else
+          {:error, {:invalid_message, message}}
+        end
       end)
 
     case Enum.find(normalized, &match?({:error, _}, &1)) do

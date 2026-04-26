@@ -59,17 +59,91 @@ defmodule TrinityCoordinator.Extractor do
   Extracts the penultimate hidden-state vector from preloaded model/tokenizer objects.
   """
   def extract_penultimate_hidden_state_from_texts(model_info, tokenizer, messages) do
+    with {:ok, result} <-
+           extract_penultimate_hidden_state_with_metadata(model_info, tokenizer, messages) do
+      {:ok, result.vector}
+    end
+  end
+
+  @doc """
+  Extracts a batch of penultimate hidden-state vectors.
+  """
+  def extract_batch_penultimate_hidden_states(model_info, tokenizer, message_batches)
+      when is_list(message_batches) do
+    message_batches
+    |> Enum.reduce_while([], fn messages, acc ->
+      case extract_penultimate_hidden_state_from_texts(model_info, tokenizer, messages) do
+        {:ok, vector} -> {:cont, [vector | acc]}
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
+    end)
+    |> case do
+      {:error, reason} ->
+        {:error, reason}
+
+      vectors ->
+        {:ok, vectors |> Enum.reverse() |> Nx.concatenate(axis: 0)}
+    end
+  end
+
+  def extract_batch_penultimate_hidden_states(_model_info, _tokenizer, _message_batches) do
+    {:error, :invalid_message_batches}
+  end
+
+  @doc """
+  Extracts the penultimate hidden-state vector and metadata useful for demos.
+  """
+  def extract_penultimate_hidden_state_with_metadata(model_info, tokenizer, messages) do
     with {:ok, transcript} <- format_messages(messages),
          inputs <- Bumblebee.apply_tokenizer(tokenizer, transcript),
          outputs <- Axon.predict(model_info.model, model_info.params, inputs),
          {:ok, hidden_states} <- extract_hidden_states(outputs),
          {:ok, hidden_state} <- extract_last_layer_hidden_state(hidden_states),
          {:ok, penultimate} <- extract_penultimate_vector(hidden_state) do
-      {:ok, penultimate}
+      {:ok,
+       %{
+         transcript: transcript,
+         input_shapes: input_shapes(inputs),
+         hidden_state_shape: Nx.shape(hidden_state),
+         vector_shape: Nx.shape(penultimate),
+         vector: penultimate
+       }}
     else
       {:error, reason} -> {:error, reason}
     end
   end
+
+  @doc """
+  Formats role/content maps into the coordinator transcript string.
+  """
+  def format_messages(messages) when is_list(messages) do
+    formatted =
+      Enum.reduce_while(messages, [], fn message, acc ->
+        role = Map.get(message, :role, Map.get(message, "role"))
+        content = Map.get(message, :content, Map.get(message, "content"))
+
+        if is_binary(role) and is_binary(content) do
+          {:cont, [{role, content} | acc]}
+        else
+          {:halt, {:error, {:invalid_messages, "invalid message entry: #{inspect(message)}"}}}
+        end
+      end)
+
+    case formatted do
+      {:error, reason} ->
+        {:error, reason}
+
+      _ ->
+        formatted_strings =
+          formatted
+          |> Enum.reverse()
+          |> Enum.map_join("\n", fn {role, content} -> "#{role}: #{content}" end)
+
+        {:ok, formatted_strings}
+    end
+  end
+
+  def format_messages(_), do: {:error, :invalid_messages}
 
   defp extract_penultimate_vector(hidden_state) do
     case extract_penultimate_hidden_state(hidden_state) do
@@ -131,30 +205,18 @@ defmodule TrinityCoordinator.Extractor do
 
   defp extract_last_layer_hidden_state(_), do: {:error, :missing_hidden_state}
 
-  defp format_messages(messages) when is_list(messages) do
-    formatted =
-      Enum.reduce_while(messages, [], fn message, acc ->
-        role = Map.get(message, :role, Map.get(message, "role"))
-        content = Map.get(message, :content, Map.get(message, "content"))
-
-        if is_binary(role) and is_binary(content) do
-          {:cont, [{role, content} | acc]}
+  defp input_shapes(inputs) when is_map(inputs) do
+    Map.new(inputs, fn {key, value} ->
+      shape =
+        if is_struct(value, Nx.Tensor) do
+          Nx.shape(value)
         else
-          {:halt, {:error, {:invalid_messages, "invalid message entry: #{inspect(message)}"}}}
+          :not_a_tensor
         end
-      end)
 
-    case formatted do
-      {:error, reason} -> {:error, reason}
-      _ ->
-        formatted_strings =
-          formatted
-          |> Enum.reverse()
-          |> Enum.map_join("\n", fn {role, content} -> "#{role}: #{content}" end)
-
-        {:ok, formatted_strings}
-    end
+      {key, shape}
+    end)
   end
 
-  defp format_messages(_), do: {:error, :invalid_messages}
+  defp input_shapes(_), do: :unknown
 end

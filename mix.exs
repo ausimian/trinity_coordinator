@@ -86,9 +86,12 @@ defmodule TrinityCoordinator.MixProject do
           TrinityCoordinator.Orchestrator
         ],
         Runtime: [
+          TrinityCoordinator.Runtime,
           TrinityCoordinator.StateManager,
           TrinityCoordinator.RoleInjector,
-          TrinityCoordinator.AgentPool
+          TrinityCoordinator.AgentPool,
+          TrinityCoordinator.AgentPool.Adapter,
+          TrinityCoordinator.AgentPool.OpenAI
         ]
       ],
       skip_undefined_reference_warnings_on: ["CHANGELOG.md"]

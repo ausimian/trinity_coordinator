@@ -21,6 +21,8 @@ defmodule TrinityCoordinator.Orchestrator do
   - `:stop_token` – verifier termination token (default `"ACCEPT"`).
   - `:agent_pool_opts` – custom options passed through to `AgentPool`.
   - `:roles` – optional role-map for index->name decoding.
+  - `:num_agents` – number of agent logits in the coordination head.
+  - `:num_roles` – number of role logits in the coordination head.
   """
   def run_loop(pid, model, params, opts \\ [])
 
@@ -30,6 +32,8 @@ defmodule TrinityCoordinator.Orchestrator do
     stop_token = Keyword.get(opts, :stop_token, "ACCEPT")
     roles = Keyword.get(opts, :roles, @roles)
     agent_pool_opts = Keyword.get(opts, :agent_pool_opts, [])
+    num_agents = Keyword.get(opts, :num_agents, AgentPool.agent_count())
+    num_roles = Keyword.get(opts, :num_roles, 3)
 
     case validate_loop_input(pid, model, params) do
       {:ok, _} ->
@@ -40,7 +44,13 @@ defmodule TrinityCoordinator.Orchestrator do
           0,
           max_turns,
           slm_context,
-          %{roles: roles, stop_token: stop_token, agent_pool_opts: agent_pool_opts}
+          %{
+            roles: roles,
+            stop_token: stop_token,
+            agent_pool_opts: agent_pool_opts,
+            num_agents: num_agents,
+            num_roles: num_roles
+          }
         )
 
       error ->
@@ -85,10 +95,12 @@ defmodule TrinityCoordinator.Orchestrator do
     messages = StateManager.get_messages(pid)
 
     with {:ok, penultimate} <- extract_router_tensor(messages, slm_context),
-         {agent_id, role_id} <- CoordinationHead.forward(model, params, penultimate),
+         {agent_id, role_id} <-
+           CoordinationHead.forward(model, params, penultimate, ctx.num_agents, ctx.num_roles),
          role_name when is_binary(role_name) <- Map.get(ctx.roles, role_id, "Worker"),
          injected_messages <- RoleInjector.inject_role(messages, role_name),
-         {:ok, response_text} <- AgentPool.call_agent(agent_id, injected_messages, ctx.agent_pool_opts) do
+         {:ok, response_text} <-
+           AgentPool.call_agent(agent_id, injected_messages, ctx.agent_pool_opts) do
       StateManager.append_assistant(pid, response_text)
 
       if verifier_accept?(role_name, response_text, ctx.stop_token) do

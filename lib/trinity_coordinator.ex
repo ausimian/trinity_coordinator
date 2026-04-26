@@ -1,18 +1,31 @@
 defmodule TrinityCoordinator do
   @moduledoc """
-  Documentation for `TrinityCoordinator`.
+  Public entry points and metadata for the TRINITY coordinator.
+
+  The core implementation lives in the focused modules:
+
+  - `TrinityCoordinator.Extractor` for real SLM hidden-state extraction.
+  - `TrinityCoordinator.CoordinationHead` for real Axon routing and training.
+  - `TrinityCoordinator.Orchestrator` for multi-turn routing.
+  - `TrinityCoordinator.Runtime` for EXLA/CUDA checks.
   """
 
+  @roles %{0 => "Thinker", 1 => "Worker", 2 => "Verifier"}
+  @gpu_demo_command "XLA_TARGET=cuda12 mix trinity.demo"
+
   @doc """
-  Hello world.
+  Returns the canonical TRINITY role map.
 
   ## Examples
 
-      iex> TrinityCoordinator.hello()
-      :world
+      iex> TrinityCoordinator.roles()
+      %{0 => "Thinker", 1 => "Worker", 2 => "Verifier"}
 
   """
-  def hello do
-    :world
-  end
+  def roles, do: @roles
+
+  @doc """
+  Returns the command used by this repository's real GPU demo.
+  """
+  def gpu_demo_command, do: @gpu_demo_command
 end
