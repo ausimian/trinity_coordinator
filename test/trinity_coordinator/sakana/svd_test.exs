@@ -262,8 +262,9 @@ defmodule TrinityCoordinator.Sakana.SVDTest do
     assert Enum.map(adapted.tensors, &Nx.type(&1.tensor)) == selected_types
     assert Enum.map(updated, &Nx.shape(&1.tensor)) == selected_shapes
 
-    assert adapted.tensors |> hd() |> Map.fetch!(:tensor) |> Runtime.tensor_backend() =~
-             "EXLA.Backend<cuda:"
+    assert Enum.all?(adapted.tensors, fn entry ->
+             Runtime.tensor_backend(entry.tensor) =~ "EXLA.Backend<cuda:"
+           end)
 
     expensive_log("finished full expensive Qwen SVF gate")
   end
@@ -305,7 +306,7 @@ defmodule TrinityCoordinator.Sakana.SVDTest do
 
   defp expensive_svd_progress(%{event: :decompose_finished} = event) do
     expensive_log(
-      "decompose done #{event.index}/#{event.total} path=#{event.path} elapsed_ms=#{event.elapsed_ms}"
+      "decompose done #{event.index}/#{event.total} path=#{event.path} u_backend=#{event.u_backend} s_backend=#{event.s_backend} v_backend=#{event.v_backend} elapsed_ms=#{event.elapsed_ms}"
     )
   end
 
@@ -317,7 +318,7 @@ defmodule TrinityCoordinator.Sakana.SVDTest do
 
   defp expensive_svd_progress(%{event: :reconstruct_finished} = event) do
     expensive_log(
-      "reconstruct done #{event.index}/#{event.total} path=#{event.path} elapsed_ms=#{event.elapsed_ms}"
+      "reconstruct done #{event.index}/#{event.total} path=#{event.path} tensor_backend=#{event.tensor_backend} elapsed_ms=#{event.elapsed_ms}"
     )
   end
 

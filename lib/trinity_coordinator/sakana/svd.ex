@@ -156,6 +156,9 @@ defmodule TrinityCoordinator.Sakana.SVD do
         index: index,
         total: total,
         path: path,
+        u_backend: TrinityCoordinator.Runtime.tensor_backend(decomposition.u),
+        s_backend: TrinityCoordinator.Runtime.tensor_backend(decomposition.s),
+        v_backend: TrinityCoordinator.Runtime.tensor_backend(decomposition.v),
         elapsed_ms: div(elapsed_us, 1000)
       })
 
@@ -210,6 +213,7 @@ defmodule TrinityCoordinator.Sakana.SVD do
           index: index,
           total: total,
           path: item.path,
+          tensor_backend: TrinityCoordinator.Runtime.tensor_backend(tensor),
           elapsed_ms: div(elapsed_us, 1000)
         })
 
