@@ -53,10 +53,13 @@ defmodule TrinityCoordinator.Trace.JSONL do
   defp normalize_value(nil), do: nil
 
   defp normalize_value(%Nx.Tensor{} = tensor) do
+    tensor_backend = TrinityCoordinator.Runtime.tensor_backend(tensor)
+    host_tensor = Nx.backend_transfer(tensor, Nx.BinaryBackend)
+
     %{
       tensor_shape: Nx.shape(tensor),
-      tensor_backend: Nx.backend_transfer(tensor) |> inspect(),
-      hash: Hash.tensor(tensor)
+      tensor_backend: tensor_backend,
+      hash: Hash.tensor(host_tensor)
     }
     |> Map.new(fn {key, value} -> {normalize_key(key), normalize_value(value)} end)
   end

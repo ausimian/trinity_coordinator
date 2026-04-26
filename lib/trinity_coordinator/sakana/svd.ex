@@ -302,7 +302,8 @@ defmodule TrinityCoordinator.Sakana.SVD do
   defp path_matches?(path, pattern) when is_binary(pattern), do: String.contains?(path, pattern)
 
   defp svd_tuple!(tensor, opts) do
-    result = apply(Nx.LinAlg, :svd, [tensor, [full_matrices?: opts[:full_matrices?]]])
+    svd = Function.capture(Nx.LinAlg, :svd, 2)
+    result = svd.(tensor, full_matrices?: opts[:full_matrices?])
 
     case result do
       {%Nx.Tensor{} = u, %Nx.Tensor{} = s, %Nx.Tensor{} = v} ->

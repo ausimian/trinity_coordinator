@@ -24,11 +24,19 @@ defmodule TrinityCoordinator.Runtime do
   end
 
   @doc """
-  Sets the process default Nx backend to the configured EXLA CUDA client.
+  Sets the current process default Nx backend to the configured EXLA CUDA client.
   """
   def put_cuda_backend! do
     require_cuda!()
-    Nx.global_default_backend({EXLA.Backend, client: :cuda})
+    Nx.default_backend({EXLA.Backend, client: :cuda})
+  end
+
+  @doc """
+  Runs a function with the current process default backend set to EXLA CUDA.
+  """
+  def with_cuda_backend!(fun) when is_function(fun, 0) do
+    require_cuda!()
+    Nx.with_default_backend({EXLA.Backend, client: :cuda}, fun)
   end
 
   @doc """

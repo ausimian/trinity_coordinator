@@ -35,6 +35,8 @@ defmodule TrinityCoordinator.Trace.Hash do
   @doc "Hashes an Nx tensor deterministically by value and shape."
   @spec tensor(Nx.Tensor.t()) :: hash()
   def tensor(%Nx.Tensor{} = tensor) do
+    tensor = Nx.backend_transfer(tensor, Nx.BinaryBackend)
+
     data =
       tensor
       |> Nx.to_flat_list()
@@ -80,6 +82,8 @@ defmodule TrinityCoordinator.Trace.Hash do
   defp normalize_key(key), do: inspect(key)
 
   defp tensor_digest(tensor) do
+    tensor = Nx.backend_transfer(tensor, Nx.BinaryBackend)
+
     {
       Nx.shape(tensor),
       Nx.type(tensor),

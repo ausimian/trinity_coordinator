@@ -196,6 +196,7 @@ defmodule TrinityCoordinator.Sakana.SVDTest do
   end
 
   @tag :expensive_qwen_svd
+  @tag timeout: 30 * 60 * 1000
   test "fully reconstructs and reinserts all Sakana-selected Qwen SVF tensors on CUDA" do
     Runtime.put_cuda_backend!()
 
