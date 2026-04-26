@@ -32,10 +32,14 @@ defmodule TrinityCoordinator.Extractor do
   def load_slm_model(
         slm_repo \\ @default_slm_repo,
         slm_module \\ @default_slm_module,
-        architecture \\ @default_slm_architecture
+        architecture \\ @default_slm_architecture,
+        opts \\ []
       ) do
     with {:ok, model_info} <-
-           Bumblebee.load_model(slm_repo, module: slm_module, architecture: architecture),
+           Bumblebee.load_model(
+             slm_repo,
+             Keyword.merge([module: slm_module, architecture: architecture], opts)
+           ),
          {:ok, tokenizer} <- Bumblebee.load_tokenizer(slm_repo) do
       {:ok, {model_info, tokenizer}}
     end
@@ -48,9 +52,11 @@ defmodule TrinityCoordinator.Extractor do
         messages,
         slm_repo \\ @default_slm_repo,
         slm_module \\ @default_slm_module,
-        architecture \\ @default_slm_architecture
+        architecture \\ @default_slm_architecture,
+        opts \\ []
       ) do
-    with {:ok, {model_info, tokenizer}} <- load_slm_model(slm_repo, slm_module, architecture) do
+    with {:ok, {model_info, tokenizer}} <-
+           load_slm_model(slm_repo, slm_module, architecture, opts) do
       extract_penultimate_hidden_state_from_texts(model_info, tokenizer, messages)
     end
   end
@@ -96,7 +102,10 @@ defmodule TrinityCoordinator.Extractor do
   def extract_penultimate_hidden_state_with_metadata(model_info, tokenizer, messages) do
     with {:ok, transcript} <- format_messages(messages),
          inputs <- Bumblebee.apply_tokenizer(tokenizer, transcript),
-         outputs <- Axon.predict(model_info.model, model_info.params, inputs),
+         outputs <-
+           Axon.predict(model_info.model, model_info.params, inputs,
+             global_layer_options: [output_hidden_states: true]
+           ),
          {:ok, hidden_states} <- extract_hidden_states(outputs),
          {:ok, hidden_state} <- extract_last_layer_hidden_state(hidden_states),
          {:ok, penultimate} <- extract_penultimate_vector(hidden_state) do
@@ -156,8 +165,8 @@ defmodule TrinityCoordinator.Extractor do
     cond do
       has_tensor?(outputs[:hidden_state]) -> {:ok, outputs[:hidden_state]}
       has_tensor?(outputs["hidden_state"]) -> {:ok, outputs["hidden_state"]}
-      has_tensor?(outputs[:hidden_states]) -> {:ok, outputs[:hidden_states]}
-      has_tensor?(outputs["hidden_states"]) -> {:ok, outputs["hidden_states"]}
+      has_hidden_container?(outputs[:hidden_states]) -> {:ok, outputs[:hidden_states]}
+      has_hidden_container?(outputs["hidden_states"]) -> {:ok, outputs["hidden_states"]}
       true -> {:error, :missing_hidden_state}
     end
   end
@@ -167,6 +176,21 @@ defmodule TrinityCoordinator.Extractor do
   defp has_tensor?(%Axon.None{}), do: false
   defp has_tensor?(tensor) when is_struct(tensor, Nx.Tensor), do: true
   defp has_tensor?(_), do: false
+
+  defp has_hidden_container?(%Axon.None{}), do: false
+  defp has_hidden_container?(%Nx.Tensor{}), do: true
+
+  defp has_hidden_container?(hidden_states) when is_tuple(hidden_states) do
+    hidden_states
+    |> Tuple.to_list()
+    |> Enum.any?(&has_tensor?/1)
+  end
+
+  defp has_hidden_container?(hidden_states) when is_list(hidden_states) do
+    Enum.any?(hidden_states, &has_tensor?/1)
+  end
+
+  defp has_hidden_container?(_), do: false
 
   defp extract_last_layer_hidden_state(hidden_states) when is_struct(hidden_states, Nx.Tensor) do
     {:ok, hidden_states}

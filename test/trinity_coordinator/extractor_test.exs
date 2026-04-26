@@ -63,6 +63,28 @@ defmodule TrinityCoordinator.ExtractorTest do
   end
 
   @tag :integration
+  @tag :qwen
+  test "extracts qwen coordinator hidden state on CUDA" do
+    Runtime.put_cuda_backend!()
+
+    messages = [%{"role" => "user", "content" => "Route this short request."}]
+
+    assert {:ok, {model_info, tokenizer}} =
+             TrinityCoordinator.SLMProfile.load_profile(:qwen_coordinator)
+
+    assert {:ok, metadata} =
+             Extractor.extract_penultimate_hidden_state_with_metadata(
+               model_info,
+               tokenizer,
+               messages
+             )
+
+    assert metadata.vector_shape == {1, 1024}
+    assert metadata.hidden_state_shape |> Tuple.to_list() |> List.last() == 1024
+    assert Runtime.tensor_backend(metadata.vector) =~ "EXLA.Backend<cuda:"
+  end
+
+  @tag :integration
   test "extracts real batch vectors and metadata from a real tiny SLM" do
     Runtime.put_cuda_backend!()
 

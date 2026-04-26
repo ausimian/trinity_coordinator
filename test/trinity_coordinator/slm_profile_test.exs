@@ -18,10 +18,10 @@ defmodule TrinityCoordinator.SLMProfileTest do
     profile = SLMProfile.qwen_coordinator()
 
     assert profile.name == :qwen_coordinator
-    assert profile.status in [:pending, :unsupported]
+    assert profile.status == :ready
     assert profile.expected_hidden_size == 1024
     assert is_tuple(profile.repo)
-    assert profile.module == nil
+    assert profile.module == Bumblebee.Text.Qwen3
   end
 
   test "compatibility_probe reports supported modules for ready profiles" do
@@ -32,17 +32,20 @@ defmodule TrinityCoordinator.SLMProfileTest do
   end
 
   @tag :qwen
-  test "compatibility_probe reports explicit reason when profile remains unsupported" do
+  test "compatibility_probe reports qwen as compatible" do
     {:ok, probe} = SLMProfile.compatibility_probe(:qwen_coordinator)
 
-    assert match?({:incompatible, {:unsupported_profile_status, :pending}}, probe.status)
+    assert probe.status == :compatible
+    assert Bumblebee.Text.Qwen3 in probe.supported_text_modules
   end
 
   @tag :qwen
-  test "load_profile is explicit when qwen remains unsupported" do
-    assert {:error,
-            {:unsupported_profile, :qwen_coordinator, {:unsupported_profile_status, :pending}}} =
-             SLMProfile.load_profile(SLMProfile.qwen_coordinator())
+  test "loads qwen profile through load_profile/1" do
+    Runtime.put_cuda_backend!()
+
+    assert {:ok, {model_info, tokenizer}} = SLMProfile.load_profile(:qwen_coordinator)
+    assert model_info.spec.hidden_size == 1024
+    assert tokenizer != nil
   end
 
   @tag :integration

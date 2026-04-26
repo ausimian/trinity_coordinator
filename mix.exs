@@ -41,7 +41,10 @@ defmodule TrinityCoordinator.MixProject do
       # {:dep_from_git, git: "https://github.com/elixir-lang/my_dep.git", tag: "0.1.0"}
       {:nx, "~> 0.9"},
       {:axon, "~> 0.7"},
-      {:bumblebee, "~> 0.6"},
+      {:bumblebee,
+       github: "elixir-nx/bumblebee",
+       ref: "0fd8114cf5429af9236f100f3350986e9d823c02",
+       override: true},
       {:exla, "~> 0.9"},
       {:req, "~> 0.5"},
       {:credo, "~> 1.7", only: :dev, runtime: false},

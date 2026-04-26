@@ -16,6 +16,7 @@ defmodule TrinityCoordinator.SLMProfile do
           required(:expected_hidden_size) => pos_integer() | nil,
           required(:xla_target) => String.t(),
           required(:status) => profile_status,
+          optional(:load_options) => keyword(),
           optional(:notes) => String.t()
         }
 
@@ -48,13 +49,17 @@ defmodule TrinityCoordinator.SLMProfile do
     %{
       name: :qwen_coordinator,
       repo: {:hf, "Qwen/Qwen3-0.6B"},
-      module: nil,
-      architecture: :base,
+      module: Bumblebee.Text.Qwen3,
+      architecture: :for_causal_language_modeling,
       expected_hidden_size: 1024,
       xla_target: "cuda12",
-      status: :pending,
+      status: :ready,
+      load_options: [
+        backend: {EXLA.Backend, client: :cuda},
+        type: :bf16
+      ],
       notes:
-        "Pending dependency/compatibility validation; set module to a supported Bumblebee Qwen-compatible module when available"
+        "Qwen3-0.6B causal-LM coordinator profile for CUDA-backed hidden-state extraction and Sakana SVF tensor selection"
     }
   end
 
@@ -76,7 +81,8 @@ defmodule TrinityCoordinator.SLMProfile do
            TrinityCoordinator.Extractor.load_slm_model(
              ready_profile.repo,
              ready_profile.module,
-             ready_profile.architecture
+             ready_profile.architecture,
+             Map.get(ready_profile, :load_options, [])
            ) do
       {:ok, {model_info, tokenizer}}
     else

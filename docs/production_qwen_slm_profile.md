@@ -3,9 +3,11 @@
 This guide describes how to add and validate a production SLM profile for a
 Qwen-class coordinator model in `trinity_coordinator`.
 
-The current repository intentionally uses `hf-internal-testing/tiny-random-gpt2`
-for integration tests because it is small, fast, and already supported by the
-current `Bumblebee` dependency lane. That test model proves the real mechanics:
+The repository keeps `hf-internal-testing/tiny-random-gpt2` as the fast baseline
+because it is small and cheap to run. The production Qwen path now uses
+`Qwen/Qwen3-0.6B` through `Bumblebee.Text.Qwen3` on CUDA-backed EXLA. The tiny
+profile remains useful for quick regression checks; the Qwen profile proves the
+paper-scale hidden width and target model family.
 
 1. Load tokenizer and model with `Bumblebee`.
 2. Run a real `Axon.predict/3` SLM forward pass.
@@ -74,52 +76,54 @@ hidden_size = Nx.axis_size(metadata.vector, 1)
 model = TrinityCoordinator.CoordinationHead.build_model(hidden_size, num_agents, 3)
 ```
 
-## Current Blocker
+## Current Qwen Runtime Lane
 
 The checked-in dependency lane is:
 
-- `bumblebee ~> 0.6`
+- `bumblebee` pinned to upstream `elixir-nx/bumblebee`
+  `0fd8114cf5429af9236f100f3350986e9d823c02`
 - `axon ~> 0.7`
 - `nx ~> 0.9`
 - `exla ~> 0.9`
 
-On this host, that lane is verified with `XLA_TARGET=cuda12`. The local
-`Bumblebee 0.6.3` codebase does not include a `Bumblebee.Text.Qwen` module or
-an architecture inference mapping for Qwen class names. The supported local
-causal/text modules include GPT-2, GPT-NeoX, Llama, Mistral, Gemma, Phi, and
-Phi-3, but not Qwen.
+On this host, that lane is verified with `XLA_TARGET=cuda12`. Hex
+`bumblebee 0.6.3` does not ship Qwen3, so this repo pins the upstream Bumblebee
+commit that includes `Bumblebee.Text.Qwen3` and its Hugging Face parameter
+mapping.
 
-This means the production Qwen profile should wait until at least one of these
-is true:
+### `qwen_cuda_ready` outcome
 
-- Bumblebee ships first-class Qwen/Qwen2/Qwen3 support.
-- A Qwen model repository is confirmed to load correctly through an existing
-  compatible Bumblebee module without parameter-shape or tokenizer issues.
-- This repository adds a maintained Qwen implementation and parameter mapping.
+Current resolved versions used for this outcome:
 
-### `qwen_deps_blocked` outcome (host snapshot)
-
-Current resolved versions used for this blocker decision:
-
-- `bumblebee 0.6.3`
+- `bumblebee` git ref `0fd8114cf5429af9236f100f3350986e9d823c02`
 - `axon 0.7.0`
 - `nx 0.10.0`
 - `exla 0.10.0`
 
-Outcome: `qwen_deps_blocked` remains active on this host until either
-`Bumblebee.Text.Qwen` is present or a supported mapping is proven for a Qwen
-model repository.
+Outcome: `qwen_cuda_ready` is active for base Qwen hidden-state extraction.
+`SLMProfile.qwen_coordinator/0` uses:
 
-Do not merge a profile that aliases Qwen to another architecture unless the
-full validation matrix below passes on the target model.
+- repo: `{:hf, "Qwen/Qwen3-0.6B"}`
+- module: `Bumblebee.Text.Qwen3`
+- architecture: `:for_causal_language_modeling`
+- load options: `backend: {EXLA.Backend, client: :cuda}`, `type: :bf16`
+- expected hidden size: `1024`
+
+Hidden states are enabled at prediction time with Axon's global layer option
+`global_layer_options: [output_hidden_states: true]`. Do not pass
+`output_hidden_states` as a Qwen3 `spec_overrides` value; Qwen3 does not accept
+that field as a config attribute.
+
+Do not count a CPU-only run as passing this profile. The test must prove the
+result tensor backend contains `EXLA.Backend<cuda:`.
 
 Current local probe status:
 
 - `test/trinity_coordinator/slm_profile_test.exs` includes an `@tag :qwen`
-  probe that asserts the current profile path returns
-  `{:error, {:unsupported_profile, :qwen_coordinator}}`.
-- That keeps the blocker explicit and prevents accidental aliasing to another
-  architecture.
+  profile compatibility and model-load probe.
+- `test/trinity_coordinator/extractor_test.exs` includes an `@tag :qwen`
+  hidden-state probe that extracts a real `{1, 1024}` Qwen vector on CUDA.
+- Run both with `XLA_TARGET=cuda12 mix test --only qwen --trace`.
 
 ## Model Selection Checklist
 
@@ -300,13 +304,14 @@ as dependency support, model choice, or profile API details change.
 - [x] Red: add Qwen compatibility probe or `@tag :qwen` model-load test.
 - [x] Green: resolve dependency/module support without breaking tiny-profile
       integration tests.
-- [ ] Red: add Qwen hidden-state extraction test requiring CUDA backend.
-- [ ] Green: extract the Qwen second-to-last token vector.
-- [ ] Red: add Qwen routing test using `CoordinationHead.route/5`.
-- [ ] Green: route from the Qwen vector with real Axon logits.
+- [x] Red: add Qwen hidden-state extraction test requiring CUDA backend.
+- [x] Green: extract the Qwen second-to-last token vector.
+- [x] Red: add Qwen routing test using `CoordinationHead.route/5`.
+- [x] Green: route from the Qwen vector with real Axon logits.
 - [ ] Red: add demo profile option test or command-level smoke check.
 - [ ] Green: implement `mix trinity.demo --profile qwen`.
-- [ ] Update README, this guide, and HexDocs extras.
+- [ ] Update README, this guide, and HexDocs extras for the eventual demo
+      command.
 
 ## Required Tests
 

@@ -104,36 +104,37 @@ and builds the head from the observed vector width.
 
 Current dependency lane:
 
-- `bumblebee ~> 0.6`
+- `bumblebee` pinned to upstream `elixir-nx/bumblebee`
+  `0fd8114cf5429af9236f100f3350986e9d823c02`
 - `axon ~> 0.7`
 - `nx ~> 0.9`
 - `exla ~> 0.9`
 
 Exact resolved dependency versions for this host (`mix.lock`):
 
-- `bumblebee 0.6.3`
+- `bumblebee` git ref `0fd8114cf5429af9236f100f3350986e9d823c02`
 - `axon 0.7.0`
 - `nx 0.10.0`
 - `exla 0.10.0`
 - `xla 0.9.1`
 
-`qwen_deps_blocked` outcome on this host:
+`qwen_cuda_ready` outcome on this host:
 
-- `bumblebee 0.6.3` does not expose `Bumblebee.Text.Qwen`, and no compatible
-  Qwen model module mapping is available for this dependency lane.
-- Qwen production profile remains explicitly `:pending` until dependency support
-  is verified.
+- The pinned Bumblebee commit exposes `Bumblebee.Text.Qwen3`.
+- `SLMProfile.qwen_coordinator/0` loads `Qwen/Qwen3-0.6B` through
+  `Bumblebee.Text.Qwen3` with params on `{EXLA.Backend, client: :cuda}` and
+  `type: :bf16`.
+- `XLA_TARGET=cuda12 mix test --only qwen --trace` verifies a real
+  `{1, 1024}` Qwen hidden-state vector on `EXLA.Backend<cuda:...>`.
 
-That stack uses the CUDA12 EXLA target on this host. A newer CUDA13 lane is
-available for newer Nx/EXLA versions, but current Bumblebee constraints keep
-this project on CUDA12 until the dependency set can be upgraded together.
+That stack uses the CUDA12 EXLA target on this host.
 
-The dependency gate also applies to profile selection:
+The Qwen profile gate applies to profile selection:
 
-- do not pass `qwen_coordinator` through `load_profile/1` when status is
-  `:pending`
-- do not route on Qwen model vectors until dedicated Qwen compatibility checks
-  pass
+- `qwen_coordinator` is expected to load successfully on GPU-backed EXLA.
+- do not treat CPU-only Qwen runs as passing the production profile gate.
+- do not claim Sakana-weight parity until the SVD/SVF and router-head artifacts
+  are imported and compared against the Python reference path.
 
 ## GPU Setup
 
@@ -351,8 +352,8 @@ XLA_TARGET=cuda12 mix docs
 
 ## Roadmap
 
-- Add a production SLM profile for a Qwen-class coordinator model once the
-  Bumblebee/Nx dependency lane supports it cleanly on this host. See
+- Extend the Qwen-class coordinator path from GPU-backed hidden-state extraction
+  into Sakana artifact import, adapted-weight loading, and route-logit parity. See
   [Production Qwen SLM Profile](docs/production_qwen_slm_profile.md).
 - Implement sep-CMA-ES training for terminal binary rewards, matching the
   paper's label-free optimization path. See
