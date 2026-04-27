@@ -30,9 +30,11 @@ Given a loaded `Qwen/Qwen3-0.6B` Bumblebee model:
 7. Load router head weights into the Axon/Nx head.
 8. Route from a real Qwen hidden state on `EXLA.Backend<cuda:...>`.
 
-## TDD Milestones
+## Track Checklist
 
-### 1. SVD Tensor Math
+### Math Track
+
+#### 1. SVD Tensor Math
 
 - [x] Red: test decomposes a small `{m, n}` tensor into `{u, s, v}`.
 - [x] Green: implement `TrinityCoordinator.Sakana.SVD.decompose_tensor/2`.
@@ -41,7 +43,7 @@ Given a loaded `Qwen/Qwen3-0.6B` Bumblebee model:
 - [x] QC: assert max absolute reconstruction error is below tolerance.
 - [x] QC: assert tensor backend remains CUDA when input is CUDA.
 
-### 2. Sakana Selection Rule
+#### 2. Sakana Selection Rule
 
 - [x] Red: test rank-1 tensors and singleton-dimension tensors are skipped.
 - [x] Green: implement `decomposable_tensor?/1`.
@@ -51,7 +53,9 @@ Given a loaded `Qwen/Qwen3-0.6B` Bumblebee model:
       retained for future param-tree insertion.
 - [x] QC: path ordering is stable across runs.
 
-### 3. Router Vector Loader
+#### 3. Router Vector Loader
+
+### Export Track
 
 - [x] Red: load `trinity_router_es_vector.safetensors`.
 - [x] Green: implement safetensors vector load helper.
@@ -61,14 +65,14 @@ Given a loaded `Qwen/Qwen3-0.6B` Bumblebee model:
 - [x] QC: assert vector shape is `{19456}`.
 - [x] QC: assert head shape is `{10, 1024}`.
 
-### 4. Qwen Structural Gate
+#### 4. Qwen Structural Gate
 
 - [x] Red: load `Qwen/Qwen3-0.6B` through `SLMProfile.qwen_coordinator/0`.
 - [x] Green: select decomposable Qwen tensors from the loaded params tree.
 - [x] QC: assert selected tensors are on `EXLA.Backend<cuda:...>`.
 - [x] QC: assert Qwen hidden-state extraction still returns `{1, 1024}` on CUDA.
 
-### 5. Layer-26 SVF Gate
+#### 5. Layer-26 SVF Gate
 
 - [x] Red: identify layer-26 Qwen tensors in the Elixir/Bumblebee params tree.
 - [x] Green: add explicit layer-filter support.
@@ -78,7 +82,7 @@ Given a loaded `Qwen/Qwen3-0.6B` Bumblebee model:
 - [x] QC: map a representative layer-26 tensor to its exact Sakana scale-offset
       span without running full-vocabulary SVD in the default Qwen gate.
 
-### 6. Sakana Vector Application
+#### 6. Sakana Vector Application
 
 - [x] Red: apply scale offsets to selected decomposed tensors.
 - [x] Green: reconstruct adapted tensors in Elixir.
@@ -95,21 +99,25 @@ Given a loaded `Qwen/Qwen3-0.6B` Bumblebee model:
 - [ ] QC: run the explicit expensive gate on a clean GPU and record the wall
       time/VRAM outcome before treating full-backbone SVF import as routine.
 
-### 7. Router Head Application
+#### 7. Router Head Application
+
+### Runtime Track
 
 - [x] Red: load the final `10240` vector values as a linear head.
 - [x] Green: reshape to `{10, 1024}` and load into the existing Axon head path.
 - [x] QC: route logits have shape `{1, 10}`.
 - [x] QC: split route logits into `7` agent logits and `3` role logits.
 
-### 8. End-To-End Qwen Route Gate
+#### 8. End-To-End Qwen Route Gate
 
 - [x] Red: Qwen hidden state plus Sakana head vector produces route logits.
 - [x] Green: route using real `CoordinationHead.route/5` semantics.
 - [x] QC: backend assertion remains `EXLA.Backend<cuda:...>`.
-- [ ] QC: traces include profile, vector shape, logits shape, and backend.
+- [x] QC: traces include profile, vector shape, logits shape, and backend.
 
 ## Hard Verification Commands
+
+### Math
 
 Fast math/loader tests:
 
@@ -117,7 +125,7 @@ Fast math/loader tests:
 XLA_TARGET=cuda12 mix test test/trinity_coordinator/sakana/svd_test.exs
 ```
 
-Qwen GPU structural tests:
+### Export
 
 ```sh
 XLA_TARGET=cuda12 mix test --only qwen --trace
@@ -130,7 +138,7 @@ XLA_TARGET=cuda12 mix test test/trinity_coordinator/sakana/svd_test.exs --exclud
 XLA_TARGET=cuda12 mix test test/trinity_coordinator/sakana/svd_test.exs --only qwen --trace
 ```
 
-Full expensive SVF reconstruction/import gate:
+### Runtime
 
 ```sh
 XLA_TARGET=cuda12 mix test test/trinity_coordinator/sakana/svd_test.exs --only expensive_qwen_svd --trace

@@ -5,6 +5,7 @@ defmodule TrinityCoordinator.SLMProfile do
   Profiles define model loading metadata without coupling the router to concrete
   repository names throughout application code.
   """
+  alias TrinityCoordinator.Sakana.Artifact
 
   @type profile_status :: :ready | :pending | :unsupported
 
@@ -63,9 +64,29 @@ defmodule TrinityCoordinator.SLMProfile do
     }
   end
 
+  @doc "Production artifact-driven Sakana-adapted Qwen coordinator profile."
+  def qwen_sakana_adapted do
+    %{
+      name: :qwen_sakana_adapted,
+      repo: {:hf, "Qwen/Qwen3-0.6B"},
+      module: Bumblebee.Text.Qwen3,
+      architecture: :for_causal_language_modeling,
+      expected_hidden_size: 1024,
+      xla_target: "cuda12",
+      status: :ready,
+      adapted_artifact_dir: Artifact.default_output_dir(),
+      load_options: [
+        backend: {EXLA.Backend, client: :cuda},
+        type: :bf16
+      ],
+      notes: "Qwen3-0.6B causal-LM coordinator profile with runtime Sakana adaptation artifacts"
+    }
+  end
+
   @doc "Returns a profile by known name."
   def profile(:tiny_gpt2), do: {:ok, tiny_gpt2()}
   def profile(:qwen_coordinator), do: {:ok, qwen_coordinator()}
+  def profile(:qwen_sakana_adapted), do: {:ok, qwen_sakana_adapted()}
   def profile(other), do: {:error, {:unknown_profile, other}}
 
   @doc "Load by known profile name or full profile map after compatibility validation."
@@ -83,7 +104,8 @@ defmodule TrinityCoordinator.SLMProfile do
              ready_profile.module,
              ready_profile.architecture,
              Map.get(ready_profile, :load_options, [])
-           ) do
+           ),
+         {:ok, model_info} <- apply_profile_artifact_patch(ready_profile, model_info) do
       {:ok, {model_info, tokenizer}}
     else
       {:error, reason} -> {:error, reason}
@@ -227,6 +249,22 @@ defmodule TrinityCoordinator.SLMProfile do
   end
 
   defp probe_module(_), do: {:incompatible, :invalid_module}
+
+  defp apply_profile_artifact_patch(profile, model_info) when is_map(profile) do
+    case Map.get(profile, :adapted_artifact_dir) do
+      nil ->
+        {:ok, model_info}
+
+      "" ->
+        {:ok, model_info}
+
+      artifact_dir ->
+        {:ok, Artifact.patch_model_info!(model_info, artifact_dir)}
+    end
+  rescue
+    e ->
+      {:error, {:artifact_patch_error, Exception.message(e)}}
+  end
 
   defp supported_text_modules do
     Application.spec(:bumblebee, :modules)

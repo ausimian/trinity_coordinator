@@ -2,6 +2,7 @@ defmodule TrinityCoordinator.Sakana.SVDTest do
   use ExUnit.Case, async: false
 
   alias TrinityCoordinator.{CoordinationHead, Runtime, SLMProfile}
+  alias TrinityCoordinator.Sakana.{Artifact, Exporter}
   alias TrinityCoordinator.Sakana.SVD
 
   @router_vector_path "priv/sakana_trinity/artifacts/trinity_router_es_vector.safetensors"
@@ -197,89 +198,358 @@ defmodule TrinityCoordinator.Sakana.SVDTest do
 
   @tag :expensive_qwen_svd
   @tag timeout: 30 * 60 * 1000
-  test "fully reconstructs and reinserts all Sakana-selected Qwen SVF tensors on CUDA" do
-    expensive_log("starting full expensive Qwen SVF gate")
+  test "exports one Sakana-selected Qwen tensor and validates partial artifacts" do
     Runtime.put_cuda_backend!()
 
-    expensive_log("loading safetensors router vector from #{@router_vector_path}")
-    vector = SVD.load_router_vector!(@router_vector_path)
-    split = SVD.split_router_vector(vector, 9216, 1024, 10)
-    expensive_log("loaded router vector shape=#{inspect(Nx.shape(vector))}")
-    expensive_log("split scale_offsets=#{inspect(Nx.shape(split.scale_offsets))}")
-    expensive_log("split head_weights=#{inspect(Nx.shape(split.head_weights))}")
-
-    expensive_log("loading qwen coordinator profile on CUDA")
-    assert {:ok, {model_info, _tokenizer}} = SLMProfile.load_profile(:qwen_coordinator)
-    expensive_log("loaded qwen spec hidden_size=#{model_info.spec.hidden_size}")
-
-    expensive_log("selecting Sakana-compatible Qwen tensors")
-
-    selected =
-      SVD.decomposable_tensor_entries(model_info.params,
-        path_filter: SVD.layer_index_filter([26])
+    out_dir =
+      Path.join(
+        System.tmp_dir!(),
+        "trinity_sakana_adapted_smoke_#{System.unique_integer([:positive])}"
       )
 
-    selected_shapes = Enum.map(selected, &Nx.shape(&1.tensor))
-    selected_types = Enum.map(selected, &Nx.type(&1.tensor))
-    selected_singular_values = SVD.singular_value_count(selected)
-
-    expensive_log("selected tensor_count=#{length(selected)}")
-    expensive_log("selected singular_value_count=#{selected_singular_values}")
-
-    Enum.with_index(selected, 1)
-    |> Enum.each(fn {entry, index} ->
-      expensive_log(
-        "selected #{index}/#{length(selected)} path=#{entry.path} shape=#{inspect(Nx.shape(entry.tensor))} type=#{inspect(Nx.type(entry.tensor))} singular_values=#{entry.tensor |> Nx.shape() |> Tuple.to_list() |> Enum.min()} backend=#{Runtime.tensor_backend(entry.tensor)}"
-      )
+    on_exit(fn ->
+      File.rm_rf(out_dir)
     end)
 
-    expensive_log("adapting selected tensors with full 9216-offset vector")
+    assert {:ok, manifest} =
+             Exporter.export_adapted(
+               out_dir: out_dir,
+               source_vector_path: @router_vector_path,
+               source_vector_tensor: "trinity_router_es_vector",
+               only_index: 1,
+               force: true,
+               skip_existing: false,
+               progress: &expensive_svd_progress/1
+             )
 
-    adapted =
-      SVD.adapt_tensors(selected, split.scale_offsets, progress: &expensive_svd_progress/1)
+    assert manifest["status"] == "partial"
+    assert manifest["export_complete"] == false
+    assert manifest["selected_tensor_count"] == 9
 
-    expensive_log(
-      "adapted tensor_count=#{length(adapted.tensors)} offset_count=#{adapted.offset_count}"
-    )
+    head = Artifact.load_router_head!(out_dir, manifest: manifest, allow_incomplete: true)
+    assert Nx.shape(head) == {10, 1024}
 
-    expensive_log("reinserting adapted tensors into qwen params tree")
-    updated_params = SVD.put_tensor_entries(model_info.params, adapted.tensors)
-    expensive_log("reinserted adapted tensors")
+    complete_entries =
+      manifest["selected_tensors"]
+      |> Enum.filter(fn entry -> entry["status"] == "complete" end)
+      |> Enum.to_list()
 
-    expensive_log("reselecting updated tensors for verification")
+    assert length(complete_entries) == 1
 
-    updated =
-      SVD.decomposable_tensor_entries(updated_params,
-        path_filter: SVD.layer_index_filter([26])
+    completed = hd(complete_entries)
+    checkpoint_path = Path.join(out_dir, completed["checkpoint_path"])
+
+    assert File.exists?(checkpoint_path)
+
+    tensors = Safetensors.read!(checkpoint_path)
+    assert map_size(tensors) == 1
+    assert Map.has_key?(tensors, completed["artifact_key"])
+  end
+
+  @tag :expensive_qwen_svd
+  @tag timeout: 30 * 60 * 1000
+  test "resume reuses a verified one-tensor checkpoint in partial export" do
+    Runtime.put_cuda_backend!()
+
+    out_dir =
+      Path.join(
+        System.tmp_dir!(),
+        "trinity_sakana_adapted_resume_#{System.unique_integer([:positive])}"
       )
 
-    expensive_log("verifying shapes, types, paths, and offset accounting")
-    assert selected_singular_values == 9216
-    assert adapted.offset_count == 9216
-    assert length(adapted.tensors) == length(selected)
-    assert Enum.map(adapted.tensors, & &1.path) == Enum.map(selected, & &1.path)
-    assert Enum.map(adapted.tensors, &Nx.shape(&1.tensor)) == selected_shapes
-    assert Enum.map(adapted.tensors, &Nx.type(&1.tensor)) == selected_types
-    assert Enum.map(updated, &Nx.shape(&1.tensor)) == selected_shapes
+    on_exit(fn ->
+      File.rm_rf(out_dir)
+    end)
 
-    assert Enum.all?(adapted.tensors, fn entry ->
-             Runtime.tensor_backend(entry.tensor) =~ "EXLA.Backend<cuda:"
-           end)
+    assert {:ok, first_manifest} =
+             Exporter.export_adapted(
+               out_dir: out_dir,
+               source_vector_path: @router_vector_path,
+               source_vector_tensor: "trinity_router_es_vector",
+               only_index: 1,
+               force: true,
+               skip_existing: false,
+               progress: &expensive_svd_progress/1
+             )
 
-    expensive_log("finished full expensive Qwen SVF gate")
+    first_entry =
+      first_manifest["selected_tensors"]
+      |> Enum.find(&(&1["index"] == 1))
+
+    assert first_entry["status"] == "complete"
+
+    checkpoint_path = Path.join(out_dir, first_entry["checkpoint_path"])
+    assert File.exists?(checkpoint_path)
+    first_checksum = Artifact.file_sha256!(checkpoint_path)
+
+    assert {:ok, second_manifest} =
+             Exporter.export_adapted(
+               out_dir: out_dir,
+               source_vector_path: @router_vector_path,
+               source_vector_tensor: "trinity_router_es_vector",
+               only_index: 1,
+               resume: true,
+               skip_existing: true,
+               progress: &expensive_svd_progress/1
+             )
+
+    second_entry =
+      second_manifest["selected_tensors"]
+      |> Enum.find(&(&1["index"] == 1))
+
+    assert second_entry["status"] == "complete"
+
+    assert Artifact.file_sha256!(checkpoint_path) == first_checksum
+  end
+
+  @tag :expensive_qwen_svd
+  @tag timeout: 30 * 60 * 1000
+  test "resume refuses to reuse a checkpoint with a checksum mismatch" do
+    Runtime.put_cuda_backend!()
+
+    out_dir =
+      Path.join(
+        System.tmp_dir!(),
+        "trinity_sakana_mismatch_#{System.unique_integer([:positive])}"
+      )
+
+    on_exit(fn ->
+      File.rm_rf(out_dir)
+    end)
+
+    assert {:ok, first_manifest} =
+             Exporter.export_adapted(
+               out_dir: out_dir,
+               source_vector_path: @router_vector_path,
+               source_vector_tensor: "trinity_router_es_vector",
+               only_index: 1,
+               force: true,
+               skip_existing: false,
+               progress: &expensive_svd_progress/1
+             )
+
+    first_entry =
+      first_manifest["selected_tensors"]
+      |> Enum.find(&(&1["index"] == 1))
+
+    assert first_entry["status"] == "complete"
+
+    checkpoint_path = Path.join(out_dir, first_entry["checkpoint_path"])
+
+    original_tensor =
+      checkpoint_path
+      |> Safetensors.read!()
+      |> Map.fetch!(first_entry["artifact_key"])
+      |> Nx.as_type(:f32)
+
+    mismatched_tensor = Nx.negate(original_tensor)
+
+    payload = %{
+      first_entry["artifact_key"] => Nx.backend_transfer(mismatched_tensor, Nx.BinaryBackend)
+    }
+
+    Safetensors.write!(checkpoint_path, payload)
+    mismatch_checksum = Artifact.file_sha256!(checkpoint_path)
+
+    assert mismatch_checksum != first_entry["checkpoint_sha256"]
+
+    assert {:ok, second_manifest} =
+             Exporter.export_adapted(
+               out_dir: out_dir,
+               source_vector_path: @router_vector_path,
+               source_vector_tensor: "trinity_router_es_vector",
+               only_index: 1,
+               resume: true,
+               skip_existing: true,
+               progress: &expensive_svd_progress/1
+             )
+
+    second_entry =
+      second_manifest["selected_tensors"]
+      |> Enum.find(&(&1["index"] == 1))
+
+    final_checksum = Artifact.file_sha256!(checkpoint_path)
+
+    assert second_entry["status"] == "complete"
+    assert second_entry["checkpoint_sha256"] == final_checksum
+    assert final_checksum != mismatch_checksum
+    assert second_entry["checkpoint_sha256"] == first_entry["checkpoint_sha256"]
+  end
+
+  @tag :expensive_qwen_svd
+  @tag timeout: 30 * 60 * 1000
+  test "force overwrites existing output directory for partial export" do
+    Runtime.put_cuda_backend!()
+
+    out_dir =
+      Path.join(
+        System.tmp_dir!(),
+        "trinity_sakana_force_#{System.unique_integer([:positive])}"
+      )
+
+    File.mkdir_p!(out_dir)
+    stale_path = Path.join(out_dir, "stale.txt")
+    File.write!(stale_path, "stale")
+
+    assert {:ok, manifest} =
+             Exporter.export_adapted(
+               out_dir: out_dir,
+               source_vector_path: @router_vector_path,
+               source_vector_tensor: "trinity_router_es_vector",
+               only_index: 1,
+               force: true,
+               skip_existing: false,
+               progress: &expensive_svd_progress/1
+             )
+
+    assert File.exists?(Path.join(out_dir, Artifact.manifest_file()))
+    assert manifest["selected_tensor_count"] == 9
+    assert manifest["export_complete"] == false
   end
 
   @tag :qwen
-  test "routes a real Qwen hidden vector through the Sakana linear head on CUDA" do
+  test "selected Qwen tensor manifest metadata matches live model selection" do
     Runtime.put_cuda_backend!()
 
-    vector = SVD.load_router_vector!(@router_vector_path)
-    split = SVD.split_router_vector(vector, 9216, 1024, 10)
+    assert {:ok, {model_info, _tokenizer}} = SLMProfile.load_profile(:qwen_coordinator)
+
+    selected =
+      SVD.decomposable_tensor_entries(
+        model_info.params,
+        path_filter: SVD.layer_index_filter([26])
+      )
+
+    out_dir =
+      Path.join(
+        System.tmp_dir!(),
+        "trinity_sakana_manifest_match_#{System.unique_integer([:positive])}"
+      )
+
+    on_exit(fn ->
+      File.rm_rf(out_dir)
+    end)
+
+    assert {:ok, manifest} =
+             Exporter.export_adapted(
+               out_dir: out_dir,
+               source_vector_path: @router_vector_path,
+               source_vector_tensor: "trinity_router_es_vector",
+               only_index: 1,
+               force: true,
+               skip_existing: false,
+               progress: nil
+             )
+
+    expected_paths = Enum.map(selected, & &1.path) |> Enum.sort()
+
+    manifest_paths =
+      manifest["selected_tensors"]
+      |> Enum.map(& &1["path"])
+      |> Enum.sort()
+
+    expected_shape_by_path =
+      Map.new(selected, fn entry -> {entry.path, Nx.shape(entry.tensor)} end)
+
+    assert manifest["selected_tensor_count"] == length(selected)
+    assert manifest["selected_singular_value_count"] == SVD.singular_value_count(selected)
+    assert manifest_paths == expected_paths
+
+    Enum.each(manifest["selected_tensors"], fn entry ->
+      manifest_shape = Nx.shape(Map.fetch!(expected_shape_by_path, entry["path"]))
+      assert entry["shape"] == Tuple.to_list(manifest_shape)
+    end)
+  end
+
+  @tag :qwen
+  @tag :qwen_sakana_adapted
+  test "patches qwen model params from a one-tensor resumed artifact without recomputing SVD" do
+    Runtime.put_cuda_backend!()
+
+    out_dir =
+      Path.join(
+        System.tmp_dir!(),
+        "trinity_sakana_qwen_patch_#{System.unique_integer([:positive])}"
+      )
+
+    on_exit(fn ->
+      File.rm_rf(out_dir)
+    end)
+
+    assert {:ok, full_manifest} =
+             Exporter.export_adapted(
+               out_dir: out_dir,
+               source_vector_path: @router_vector_path,
+               source_vector_tensor: "trinity_router_es_vector",
+               only_index: 1,
+               force: true,
+               skip_existing: false,
+               progress: nil
+             )
+
+    index_entry =
+      Enum.find(full_manifest["selected_tensors"], &(&1["index"] == 1))
+
+    assert index_entry["status"] == "complete"
+    assert is_list(index_entry["segments"])
+
+    assert {:ok, {model_info, _tokenizer}} = SLMProfile.load_profile(:qwen_coordinator)
+
+    manifest = Map.put(full_manifest, "selected_tensors", [index_entry])
+    manifest = Map.put(manifest, "selected_tensor_count", 1)
+    manifest = Map.put(manifest, "selected_singular_value_count", index_entry["singular_values"])
+
+    original_path_tensor = fetch_tensor!(model_info.params, index_entry["segments"])
+    patched_model_info =
+      Artifact.patch_model_info!(model_info, out_dir,
+        manifest: manifest,
+        allow_incomplete: true,
+        cast_head: false,
+        patch_router_head: false
+      )
+    patched_path_tensor = fetch_tensor!(patched_model_info.params, index_entry["segments"])
+
+    max_error =
+      Nx.subtract(patched_path_tensor, original_path_tensor)
+      |> Nx.abs()
+      |> Nx.reduce_max()
+      |> Nx.to_number()
+
+    assert max_error > 0.0
+  end
+
+  @tag :qwen
+  @tag :qwen_sakana_adapted
+  test "routes a real Qwen hidden vector through the persisted Sakana router head on CUDA" do
+    Runtime.put_cuda_backend!()
+
+    out_dir =
+      Path.join(
+        System.tmp_dir!(),
+        "trinity_sakana_head_route_#{System.unique_integer([:positive])}"
+      )
+
+    on_exit(fn ->
+      File.rm_rf(out_dir)
+    end)
+
+    assert {:ok, manifest} =
+             Exporter.export_adapted(
+               out_dir: out_dir,
+               source_vector_path: @router_vector_path,
+               source_vector_tensor: "trinity_router_es_vector",
+               only_index: 1,
+               force: true,
+               skip_existing: false,
+               progress: nil
+             )
+
+    head_weights =
+      Artifact.load_router_head!(out_dir, manifest: manifest, allow_incomplete: true)
 
     model = CoordinationHead.build_model(1024, 7, 3)
     {init_fn, _predict_fn} = Axon.build(model)
     params = init_fn.(Nx.template({1, 1024}, :f32), Axon.ModelState.empty())
-    params = SVD.put_linear_head_weights(params, split.head_weights)
+    params = SVD.put_linear_head_weights(params, head_weights)
 
     assert {:ok, {model_info, tokenizer}} = SLMProfile.load_profile(:qwen_coordinator)
 
@@ -296,6 +566,93 @@ defmodule TrinityCoordinator.Sakana.SVDTest do
     assert Runtime.tensor_backend(metadata.vector) =~ "EXLA.Backend<cuda:"
     assert Runtime.tensor_backend(route.logits) =~ "EXLA.Backend<cuda:"
     assert Nx.shape(route.logits) == {1, 10}
+  end
+
+  defp fetch_tensor!(%Axon.ModelState{} = container, segments) when is_list(segments) do
+    fetch_tensor!(container.data, segments)
+  end
+
+  defp fetch_tensor!(container, [segment]) do
+    fetch_child!(container, segment)
+  end
+
+  defp fetch_tensor!(container, [segment | rest]) do
+    container
+    |> fetch_child!(segment)
+    |> fetch_tensor!(rest)
+  end
+
+  defp fetch_child!(container, segment) when is_list(container) and is_integer(segment) do
+    Enum.fetch!(container, segment)
+  end
+
+  defp fetch_child!(container, segment) when is_tuple(container) and is_integer(segment) do
+    elem(container, segment)
+  end
+
+  defp fetch_child!(container, segment) when is_map(container) do
+    if Map.has_key?(container, segment) do
+      Map.fetch!(container, segment)
+    else
+      if is_binary(segment) do
+        atom = existing_atom(segment)
+
+        if atom && Map.has_key?(container, atom) do
+          Map.fetch!(container, atom)
+        else
+          raise ArgumentError, "missing map segment #{inspect(segment)}"
+        end
+      else
+        raise ArgumentError, "missing map segment #{inspect(segment)}"
+      end
+    end
+  end
+
+  defp fetch_child!(container, segment) do
+    raise ArgumentError,
+          "cannot descend into #{inspect(container)} with segment #{inspect(segment)}"
+  end
+
+  defp existing_atom(key) when is_binary(key) do
+    try do
+      String.to_existing_atom(key)
+    rescue
+      ArgumentError ->
+        nil
+    end
+  end
+
+  defp expensive_svd_progress(%{event: :tensor_export_started} = event) do
+    expensive_log("tensor_export_started index=#{event.index} path=#{event.path}")
+  end
+
+  defp expensive_svd_progress(%{event: :tensor_export_progress} = event) do
+    total = Map.get(event, :total)
+    total_fragment = if total, do: "/#{total}", else: ""
+
+    expensive_log(
+      "tensor_export_progress #{event.index}#{total_fragment} path=#{event.path} decompose_ms=#{event.decompose_ms} reconstruct_ms=#{event.reconstruct_ms}"
+    )
+  end
+
+  defp expensive_svd_progress(%{event: :tensor_export_finished} = event) do
+    index = Map.get(event, :index, "?")
+    total = Map.get(event, :total)
+    total_fragment = if total, do: "/#{total}", else: ""
+
+    expensive_log("tensor_export_finished #{index}#{total_fragment} path=#{event.path}")
+  end
+
+  defp expensive_svd_progress(%{event: :tensor_skipped} = event) do
+    expensive_log("tensor_skipped path=#{event.path}")
+  end
+
+  defp expensive_svd_progress(%{event: :router_head_export_complete} = event) do
+    expensive_log("router_head_export_complete path=#{event.path} sha256=#{event.sha256}")
+  end
+
+  defp expensive_svd_progress(%{event: :router_head_skipped} = event) do
+    expensive_log("router_head_skipped path=#{event.path}")
   end
 
   defp expensive_svd_progress(%{event: :decompose_started} = event) do
@@ -320,6 +677,10 @@ defmodule TrinityCoordinator.Sakana.SVDTest do
     expensive_log(
       "reconstruct done #{event.index}/#{event.total} path=#{event.path} tensor_backend=#{event.tensor_backend} elapsed_ms=#{event.elapsed_ms}"
     )
+  end
+
+  defp expensive_svd_progress(event) do
+    expensive_log("export progress: #{inspect(event)}")
   end
 
   defp expensive_log(message) do

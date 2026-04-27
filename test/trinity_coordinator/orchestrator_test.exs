@@ -110,4 +110,59 @@ defmodule TrinityCoordinator.OrchestratorTest do
              event["event"] == "provider_called" and event["status"] == "error"
            end)
   end
+
+  test "emits artifact metadata on run_started when artifact manifest is present" do
+    {:ok, pid} = StateManager.start_link([%{role: "user", content: "Solve this"}])
+
+    model = CoordinationHead.build_model(32, 5, 3)
+    {init_fn, _predict_fn} = Axon.build(model)
+    params = init_fn.(Nx.template({1, 32}, :f32), Axon.ModelState.empty())
+
+    slm_context = %{
+      model_info: %{
+        trinity_artifact_manifest: %{
+          "base_model_repo" => "Qwen/Qwen3-0.6B",
+          "bumblebee_module" => "Bumblebee.Text.Qwen3",
+          "architecture" => "for_causal_language_modeling",
+          "source_vector_sha256" => "deadbeef",
+          "source_vector_path" =>
+            "priv/sakana_trinity/artifacts/trinity_router_es_vector.safetensors"
+        },
+        trinity_artifact_manifest_hash: "cafebabe",
+        trinity_artifact_manifest_path: "/tmp/manifest.json"
+      }
+    }
+
+    trace_path =
+      Path.join(
+        System.tmp_dir!(),
+        "trinity_trace_metadata_#{System.unique_integer([:positive])}.jsonl"
+      )
+
+    File.rm(trace_path)
+
+    assert {:error, :max_turns_reached} =
+             Orchestrator.run_loop(
+               pid,
+               model,
+               params,
+               max_turns: 0,
+               slm_context: slm_context,
+               trace: [enabled: true, sink: {:jsonl, trace_path}]
+             )
+
+    parsed =
+      File.read!(trace_path) |> String.split("\n", trim: true) |> Enum.map(&Jason.decode!/1)
+
+    [run_started | _] = parsed
+
+    assert run_started["event"] == "run_started"
+    assert run_started["runtime_metadata"]["trinity_artifact_manifest_hash"] == "cafebabe"
+
+    assert run_started["runtime_metadata"]["trinity_artifact_manifest_path"] ==
+             "/tmp/manifest.json"
+
+    assert run_started["runtime_metadata"]["trinity_artifact_base_model_repo"] ==
+             "Qwen/Qwen3-0.6B"
+  end
 end

@@ -12,6 +12,8 @@ defmodule TrinityCoordinator.Orchestrator do
     Trace
   }
 
+  alias TrinityCoordinator.Sakana.Artifact
+
   @roles %{0 => "Thinker", 1 => "Worker", 2 => "Verifier"}
   @default_max_turns 5
 
@@ -53,12 +55,15 @@ defmodule TrinityCoordinator.Orchestrator do
       num_roles: num_roles
     }
 
+    runtime_metadata = build_runtime_metadata(opts[:slm_context])
+
     case validate_loop_input(pid, model, params) do
       {:ok, _} ->
         emit_trace(
           trace,
           :run_started,
           %{
+            runtime_metadata: runtime_metadata,
             max_turns: max_turns,
             num_agents: num_agents,
             num_roles: num_roles
@@ -90,6 +95,21 @@ defmodule TrinityCoordinator.Orchestrator do
         max_turns: max_turns,
         slm_context: slm_context
       )
+
+  defp build_runtime_metadata(slm_context) do
+    model_info =
+      case slm_context do
+        {model_info, _tokenizer} when is_map(model_info) -> model_info
+        %{model_info: model_info} when is_map(model_info) -> model_info
+        _ -> nil
+      end
+
+    if model_info do
+      Artifact.trace_metadata(model_info)
+    else
+      %{}
+    end
+  end
 
   defp validate_loop_input(pid, model, params) do
     cond do
@@ -127,7 +147,7 @@ defmodule TrinityCoordinator.Orchestrator do
              run_ctx.num_agents,
              run_ctx.num_roles
            ),
-         :ok <- emit_route_trace(trace, route, run_ctx.roles, turn),
+         :ok <- emit_route_trace(trace, route, extraction.vector, run_ctx.roles, turn),
          role_name = Map.get(run_ctx.roles, route.role_id, "Worker"),
          injected_messages <- RoleInjector.inject_role(messages, role_name),
          {:ok, spec} <-
@@ -231,10 +251,14 @@ defmodule TrinityCoordinator.Orchestrator do
     })
   end
 
-  defp emit_route_trace(trace, route, roles, turn) do
+  defp emit_route_trace(trace, route, vector, roles, turn) do
     emit_trace(trace, :route_selected, %{
       turn: turn,
       logits: Nx.to_flat_list(Nx.squeeze(route.logits, axes: [0])),
+      route_logit_shape: Nx.shape(route.logits),
+      route_logit_backend: Runtime.tensor_backend(route.logits),
+      vector_shape: Nx.shape(vector),
+      vector_backend: Runtime.tensor_backend(vector),
       agent_logits: Nx.to_flat_list(route.agent_logits),
       role_logits: Nx.to_flat_list(route.role_logits),
       selected_agent: route.agent_id,

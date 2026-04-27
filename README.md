@@ -86,6 +86,7 @@ Active path:
   `{EXLA.Backend, client: :cuda}`.
 - Extract real Qwen hidden-state vectors through the same
   `Extractor`/`CoordinationHead` contract used by the tiny test profile.
+- Run the artifact exporter to materialize router-head + adapted-tensor artifacts once.
 - Convert Sakana's router ES vector artifact into safetensors so the Elixir
   runtime can load it without Python at application runtime.
 - Split that vector into the exact inspected layout:
@@ -99,7 +100,7 @@ Active path:
   - Sakana normalization
   - adapted tensor reconstruction
   - params-container reinsertion using preserved path segments
-- Keep full expensive Qwen SVF reconstruction as an explicit opt-in gate, not a
+- Keep artifact export and resume behavior as the explicit opt-in GPU lane, not a
   default `mix test` path.
 
 Deferred path:
@@ -144,9 +145,14 @@ Implemented and tested:
   reproduction infrastructure rather than the active mainline.
 - `SLMProfile.qwen_coordinator/0`: loads `Qwen/Qwen3-0.6B` through the pinned
   upstream Bumblebee Qwen3 implementation on CUDA with `bf16` params.
+- `SLMProfile.qwen_sakana_adapted/0`: loads `Qwen/Qwen3-0.6B` and applies
+  generated adapted tensors/router head from
+  `priv/sakana_trinity/adapted_qwen3_0_6b_layer26`.
 - `TrinityCoordinator.Sakana.SVD`: loads the Sakana safetensors vector, splits
   the `9216 + 10240` layout, implements SVD/SVF reconstruction mechanics, loads
   the imported head into Axon, and supports adapted tensor reinsertion.
+- `TrinityCoordinator.Sakana.Artifact`: validates artifact manifests and loads
+  persisted artifacts back into the Qwen params tree and routing head.
 - `Trace.JSONL` and `Trace.Hash`: serialize tensors by preserving original
   backend labels while hashing host-transferred tensor values, avoiding EXLA
   donated-buffer flakes.
@@ -164,8 +170,8 @@ The Qwen/Sakana path is also tested directly:
 - The imported router head reshapes to `{10, 1024}` and routes through the real
   Axon head.
 - A real Qwen hidden vector routes through the imported Sakana head on CUDA.
-- The full `9216`-offset SVD reconstruction/import gate exists as an explicit
-  long-running test.
+- The artifact export gate now exists as an explicit long-running smoke test and
+  writes reusable checkpoints/artifacts for runtime loading.
 
 ## Requirements
 
@@ -378,6 +384,10 @@ Named coordinator model profiles. The production-intent profile is
 `:qwen_coordinator`, which loads `Qwen/Qwen3-0.6B` through
 `Bumblebee.Text.Qwen3` on CUDA.
 
+The runtime-adapted profile is `:qwen_sakana_adapted`, which applies
+`priv/sakana_trinity/adapted_qwen3_0_6b_layer26` artifacts to the Qwen params
+and routing head.
+
 ### `TrinityCoordinator.Sakana.SVD`
 
 Sakana artifact import and SVD/SVF mechanics:
@@ -390,6 +400,45 @@ Sakana artifact import and SVD/SVF mechanics:
 - reconstructs adapted tensors with Sakana's normalization formula,
 - reinserts adapted tensors into nested Bumblebee params containers,
 - loads imported head weights into the Axon routing head.
+
+### `TrinityCoordinator.Sakana.Artifact`
+
+Runtime artifact loader and patcher for Sakana-adapted Qwen artifacts:
+
+- validate manifest identity and completeness,
+- load checkpointed or merged artifacts,
+- patch adapted tensors into Qwen params,
+- load and patch the Sakana router head.
+
+### Export Mix Task
+
+Run this once to materialize the canonical artifact set:
+
+```bash
+XLA_TARGET=cuda12 mix trinity.sakana.export_adapted
+```
+
+Useful options:
+
+- `--out`: output directory override (default `priv/sakana_trinity/adapted_qwen3_0_6b_layer26`)
+- `--source-vector`: source safetensors path
+- `--tensor-name`: source tensor key
+- `--resume`: reuse verified checkpoints
+- `--force`: rebuild output directory
+- `--only-index`: export a single tensor for smoke testing
+- `--skip-existing`: skip verified checkpoints during export
+
+Resumption policy:
+
+- `--resume` recomputes any checkpoint that is missing or fails integrity checks
+  (`status`, tensor shape, tensor type, and checksum must all match).
+- `--force` removes and recreates the output directory, then performs a clean run.
+- For repeated smoke checks, use `--only-index 1`.
+
+Canonical smoke commands:
+
+- `XLA_TARGET=cuda12 mix trinity.sakana.export_adapted --only-index 1 --force`
+- `XLA_TARGET=cuda12 mix trinity.sakana.export_adapted --resume --only-index 1`
 
 ## Testing
 
@@ -421,8 +470,15 @@ Full opt-in SVF reconstruction/import gate:
 XLA_TARGET=cuda12 mix test test/trinity_coordinator/sakana/svd_test.exs --only expensive_qwen_svd --trace
 ```
 
-That gate performs the full selected Qwen SVD/SVF reconstruction path and can
-take minutes. It is intentionally excluded from plain `mix test`.
+That gate performs an exporter smoke path (`only-index=1`) and verifies
+`manifest.json`, router head artifact, and checkpoint persistence. It is
+intentionally excluded from plain `mix test`.
+
+Canonical runtime profile test:
+
+```bash
+XLA_TARGET=cuda12 mix test --only qwen_sakana_adapted --trace
+```
 
 Provider calls are not silently simulated in core tests. Without credentials,
 provider-boundary tests assert the real adapter returns
@@ -463,9 +519,9 @@ XLA_TARGET=cuda12 mix docs
 
 ## Roadmap
 
-- Finish the active Qwen/Sakana artifact lane: run and characterize the full
-  expensive `9216`-offset SVF reconstruction gate, apply adapted tensors in the
-  runtime Qwen coordinator path, and compare Elixir/Nx outputs against the
+- Finish the active Qwen/Sakana artifact lane: complete and validate canonical
+  artifact export, apply adapted tensors in the runtime Qwen coordinator path,
+  and compare Elixir/Nx outputs against the
   Python reference where practical. See
   [Elixir-Native SVD Decomposition For TRINITY](docs/elixir_svd_decomposition.md).
 - Expose the imported Qwen/Sakana coordinator through demo/orchestrator

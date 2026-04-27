@@ -9,6 +9,12 @@ because it is small and cheap to run. The production Qwen path now uses
 profile remains useful for quick regression checks; the Qwen profile proves the
 paper-scale hidden width and target model family.
 
+An artifact-adapted profile is also available:
+`SLMProfile.qwen_sakana_adapted/0` loads `qwen_coordinator` and applies
+generated Sakana artifacts (`adapted_tensors.safetensors` and `router_head.safetensors`)
+at profile load time. It requires the same CUDA runtime and requires a completed manifest
+in `priv/sakana_trinity/adapted_qwen3_0_6b_layer26`.
+
 1. Load tokenizer and model with `Bumblebee`.
 2. Run a real `Axon.predict/3` SLM forward pass.
 3. Extract the final hidden-state tensor.
@@ -124,6 +130,26 @@ Current local probe status:
 - `test/trinity_coordinator/extractor_test.exs` includes an `@tag :qwen`
   hidden-state probe that extracts a real `{1, 1024}` Qwen vector on CUDA.
 - Run both with `XLA_TARGET=cuda12 mix test --only qwen --trace`.
+
+Canonical adapted-profile smoke check:
+
+```bash
+XLA_TARGET=cuda12 mix test --only qwen_sakana_adapted --trace
+```
+
+Suggested implementation order after this baseline:
+
+1. Run the adapted export command to materialize artifacts:
+
+   ```bash
+   XLA_TARGET=cuda12 mix trinity.sakana.export_adapted
+   ```
+
+2. Validate runtime loading with:
+
+   ```bash
+   XLA_TARGET=cuda12 mix test test/trinity_coordinator/sakana/svd_test.exs --only qwen_sakana_adapted --trace
+   ```
 
 ## Model Selection Checklist
 
@@ -310,7 +336,7 @@ as dependency support, model choice, or profile API details change.
 - [x] Green: route from the Qwen vector with real Axon logits.
 - [ ] Red: add demo profile option test or command-level smoke check.
 - [ ] Green: implement `mix trinity.demo --profile qwen`.
-- [ ] Update README, this guide, and HexDocs extras for the eventual demo
+- [x] Update README, this guide, and HexDocs extras for the eventual demo
       command.
 
 ## Required Tests
@@ -399,6 +425,19 @@ test "routes from a real Qwen hidden state" do
   assert route.agent_id in 0..6
   assert route.role_id in 0..2
   assert Runtime.tensor_backend(route.logits) =~ "EXLA.Backend<cuda:"
+end
+```
+
+### 5. Adapted runtime smoke test
+
+```elixir
+@tag :qwen_sakana_adapted
+test "loads the adapted Qwen profile using persisted Sakana artifacts" do
+  Runtime.put_cuda_backend!()
+
+  assert {:ok, {model_info, _tokenizer}} = SLMProfile.load_profile(:qwen_sakana_adapted)
+  assert is_map(model_info)
+  assert model_info.spec.hidden_size == 1024
 end
 ```
 

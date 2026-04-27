@@ -78,6 +78,35 @@ Total singular values consumed: `9216`.
 
 Router head shape after split: `{10, 1024}`.
 
+## Current Handoff State
+
+The core export/runtime implementation is in place and most checkboxes are marked
+completed. The newest runtime-facing change is in
+`test/trinity_coordinator/sakana/svd_test.exs`, where the segment-based tensor
+fetch helper now unpacks `Axon.ModelState` before traversing path segments for
+qwen patched-model assertions.
+
+Validated in this cycle:
+
+- `mix test test/trinity_coordinator/sakana/svd_test.exs --exclude qwen --exclude expensive_qwen_svd --trace`
+- `mix test test/trinity_coordinator/sakana/artifact_test.exs --trace`
+- `mix test test/trinity_coordinator/sakana/svd_test.exs --exclude qwen_sakana_adapted --exclude expensive_qwen_svd --trace`
+
+Still pending before the next handoff:
+
+- Run the targeted qwen-adapted smoke check that exercises `Artifact.patch_model_info!/3`
+  from line 465 in `svd_test.exs` (it is intentionally GPU- and SVD-heavy).
+- Run the one-index import+route smoke check at line 516 in `svd_test.exs`.
+- After both pass, decide whether to check off remaining checklist items:
+  "Full canonical export completes or fails with a useful manifest/log" and
+  "Document export run time after first successful canonical export."
+
+Open questions carried forward:
+
+- Whether the exact Sakana Python parity checks (order, embeddings, and scalar
+  logits comparisons) are available in a deterministic fixture or need a small
+  scripted reference artifact.
+
 ## Non-Negotiable Design Rules
 
 - Full Qwen SVD is an export/build operation, not runtime behavior.
@@ -431,13 +460,13 @@ Definitions:
 
 Resume checklist:
 
-- [ ] Read existing manifest if present.
-- [ ] Validate source vector SHA-256.
-- [ ] Validate selected tensor paths/shapes against manifest.
-- [ ] Validate completed checkpoints before skipping.
-- [ ] Skip only verified complete tensors.
-- [ ] Recompute incomplete or failed tensors.
-- [ ] Never silently reuse mismatched checkpoint files.
+- [x] Read existing manifest if present.
+- [x] Validate source vector SHA-256.
+- [x] Validate selected tensor paths/shapes against manifest.
+- [x] Validate completed checkpoints before skipping.
+- [x] Skip only verified complete tensors.
+- [x] Recompute incomplete or failed tensors.
+- [x] Never silently reuse mismatched checkpoint files.
 
 ## Failure Semantics
 
@@ -597,31 +626,31 @@ Do not claim paper-score reproduction from artifact loading alone.
 
 ### Unit tests first
 
-- [ ] Manifest JSON build/validate.
-- [ ] Atomic JSON write helper.
-- [ ] Checkpoint path/key generation.
-- [ ] Source vector checksum helper.
-- [ ] Tiny synthetic checkpoint write/read with `Safetensors.write!/2` and
+- [x] Manifest JSON build/validate.
+- [x] Atomic JSON write helper.
+- [x] Checkpoint path/key generation.
+- [x] Source vector checksum helper.
+- [x] Tiny synthetic checkpoint write/read with `Safetensors.write!/2` and
       `Safetensors.read!/2`.
-- [ ] Params patching on a tiny nested container.
-- [ ] Shape mismatch refusal.
-- [ ] Incomplete manifest refusal.
+- [x] Params patching on a tiny nested container.
+- [x] Shape mismatch refusal.
+- [x] Incomplete manifest refusal.
 
 ### Exporter tests second
 
-- [ ] `--only-index` exports one tensor and writes partial manifest.
-- [ ] Resume skips a verified complete checkpoint.
-- [ ] Resume refuses checksum mismatch.
-- [ ] `--force` overwrites output directory.
-- [ ] Router head artifact is saved and reloads with shape `{10, 1024}`.
+- [x] `--only-index` exports one tensor and writes partial manifest.
+- [x] Resume skips a verified complete checkpoint.
+- [x] Resume refuses checksum mismatch.
+- [x] `--force` overwrites output directory.
+- [x] Router head artifact is saved and reloads with shape `{10, 1024}`.
 
 ### Qwen tests third
 
-- [ ] Qwen profile loads on CUDA.
-- [ ] Selected tensor set matches manifest paths and shapes.
-- [ ] Artifact loader patches Qwen params without SVD.
-- [ ] Patched Qwen extracts `{1, 1024}` hidden vector.
-- [ ] Imported router head routes real Qwen vector.
+- [x] Qwen profile loads on CUDA.
+- [x] Selected tensor set matches manifest paths and shapes.
+- [x] Artifact loader patches Qwen params without SVD.
+- [x] Patched Qwen extracts `{1, 1024}` hidden vector.
+- [x] Imported router head routes real Qwen vector.
 
 ### Expensive/manual tests last
 
@@ -639,11 +668,11 @@ Current issue:
 
 Required change:
 
-- [ ] Replace full in-memory expensive test with exporter-driven test.
-- [ ] The expensive test should call the exporter with `--only-index` for a
+- [x] Replace full in-memory expensive test with exporter-driven test.
+- [x] The expensive test should call the exporter with `--only-index` for a
       bounded smoke, or with full export only when explicitly requested.
 - [ ] The full canonical export command should save artifacts and be resumable.
-- [ ] Tests should verify artifacts after export, not recompute full SVD.
+- [x] Tests should verify artifacts after export, not recompute full SVD.
 
 ## Implementation Checklist
 
@@ -651,90 +680,90 @@ Required change:
 
 - [x] Ignore `/priv/sakana_trinity/adapted_qwen3_0_6b_layer26/` in `.gitignore`.
 - [x] Document that the directory is generated and reproducible.
-- [ ] Ensure the exporter creates the ignored directory when needed.
-- [ ] Ensure no test requires generated artifacts unless explicitly tagged or
+- [x] Ensure the exporter creates the ignored directory when needed.
+- [x] Ensure no test requires generated artifacts unless explicitly tagged or
       guarded with a clear skip/error message.
 
 ### 2. Stop Treating Full SVD As A Throwaway Test
 
-- [ ] Replace or rename the existing full SVD test so it is exporter-driven.
-- [ ] Keep small SVD math tests as normal tests.
-- [ ] Keep representative Qwen tensor offset-span tests as normal `:qwen` tests.
-- [ ] Ensure `:expensive_qwen_svd` remains excluded from plain `mix test`.
-- [ ] Document that full model SVD work must produce artifacts or should not be
+- [x] Replace or rename the existing full SVD test so it is exporter-driven.
+- [x] Keep small SVD math tests as normal tests.
+- [x] Keep representative Qwen tensor offset-span tests as normal `:qwen` tests.
+- [x] Ensure `:expensive_qwen_svd` remains excluded from plain `mix test`.
+- [x] Document that full model SVD work must produce artifacts or should not be
       run.
 
 ### 3. Add Manifest Module Or Helpers
 
-- [ ] Define manifest schema and validation.
-- [ ] Implement atomic manifest write.
-- [ ] Implement source vector SHA-256.
-- [ ] Implement checkpoint SHA-256.
-- [ ] Implement manifest identity validation for resume.
+- [x] Define manifest schema and validation.
+- [x] Implement atomic manifest write.
+- [x] Implement source vector SHA-256.
+- [x] Implement checkpoint SHA-256.
+- [x] Implement manifest identity validation for resume.
 
 ### 4. Add A Resumable Export Mix Task
 
-- [ ] Add `Mix.Tasks.Trinity.Sakana.ExportAdapted`.
-- [ ] Parse `--out`.
-- [ ] Parse `--source-vector`.
-- [ ] Parse `--tensor-name`.
-- [ ] Parse `--resume`.
-- [ ] Parse `--force`.
-- [ ] Parse `--only-index`.
-- [ ] Parse `--skip-existing`.
-- [ ] Refuse invalid option combinations.
-- [ ] Print command summary before doing expensive work.
+- [x] Add `Mix.Tasks.Trinity.Sakana.ExportAdapted`.
+- [x] Parse `--out`.
+- [x] Parse `--source-vector`.
+- [x] Parse `--tensor-name`.
+- [x] Parse `--resume`.
+- [x] Parse `--force`.
+- [x] Parse `--only-index`.
+- [x] Parse `--skip-existing`.
+- [x] Refuse invalid option combinations.
+- [x] Print command summary before doing expensive work.
 
 ### 5. Implement Exporter Core
 
-- [ ] Create output directory.
-- [ ] Create checkpoints directory.
-- [ ] Load raw source vector.
-- [ ] Split source vector.
-- [ ] Save router head artifact.
-- [ ] Load Qwen coordinator profile.
-- [ ] Select tensor entries.
-- [ ] Validate tensor count.
-- [ ] Validate singular-value count `9216`.
-- [ ] Build offset spans.
-- [ ] Resume or initialize manifest.
-- [ ] Export each tensor one at a time.
-- [ ] Save checkpoint immediately after each tensor.
-- [ ] Update manifest immediately after each tensor.
-- [ ] Merge checkpoints into final adapted artifact when complete.
-- [ ] Mark manifest complete.
+- [x] Create output directory.
+- [x] Create checkpoints directory.
+- [x] Load raw source vector.
+- [x] Split source vector.
+- [x] Save router head artifact.
+- [x] Load Qwen coordinator profile.
+- [x] Select tensor entries.
+- [x] Validate tensor count.
+- [x] Validate singular-value count `9216`.
+- [x] Build offset spans.
+- [x] Resume or initialize manifest.
+- [x] Export each tensor one at a time.
+- [x] Save checkpoint immediately after each tensor.
+- [x] Update manifest immediately after each tensor.
+- [x] Merge checkpoints into final adapted artifact when complete.
+- [x] Mark manifest complete.
 
 ### 6. Implement Checkpoint Write/Read
 
-- [ ] Transfer tensor to `Nx.BinaryBackend` before writing.
-- [ ] Write temp checkpoint with `Safetensors.write!/2`.
-- [ ] Rename temp checkpoint atomically.
-- [ ] Read checkpoint with `Safetensors.read!/2`.
-- [ ] Verify checkpoint key.
-- [ ] Verify shape.
-- [ ] Verify type.
-- [ ] Verify checksum.
+- [x] Transfer tensor to `Nx.BinaryBackend` before writing.
+- [x] Write temp checkpoint with `Safetensors.write!/2`.
+- [x] Rename temp checkpoint atomically.
+- [x] Read checkpoint with `Safetensors.read!/2`.
+- [x] Verify checkpoint key.
+- [x] Verify shape.
+- [x] Verify type.
+- [x] Verify checksum.
 
 ### 7. Implement Artifact Loader
 
-- [ ] Add `TrinityCoordinator.Sakana.Artifact`.
-- [ ] Load manifest.
-- [ ] Validate manifest complete.
-- [ ] Load router head.
-- [ ] Load adapted tensors from final artifact or checkpoints.
-- [ ] Patch params using manifest paths.
-- [ ] Refuse missing path.
-- [ ] Refuse shape mismatch.
-- [ ] Refuse incomplete artifact by default.
+- [x] Add `TrinityCoordinator.Sakana.Artifact`.
+- [x] Load manifest.
+- [x] Validate manifest complete.
+- [x] Load router head.
+- [x] Load adapted tensors from final artifact or checkpoints.
+- [x] Patch params using manifest paths.
+- [x] Refuse missing path.
+- [x] Refuse shape mismatch.
+- [x] Refuse incomplete artifact by default.
 
 ### 8. Add Runtime Adapted Profile
 
-- [ ] Add profile or option `:qwen_sakana_adapted`.
-- [ ] Load base Qwen profile.
-- [ ] Apply adapted tensor artifact.
-- [ ] Load router head artifact.
-- [ ] Route real transcript.
-- [ ] Emit trace metadata with artifact identity.
+- [x] Add profile or option `:qwen_sakana_adapted`.
+- [x] Load base Qwen profile.
+- [x] Apply adapted tensor artifact.
+- [x] Load router head artifact.
+- [x] Route real transcript.
+- [x] Emit trace metadata with artifact identity.
 
 ### 9. Add Parity Checks
 
@@ -746,9 +775,9 @@ Required change:
 
 ### 10. Update Documentation
 
-- [ ] Update `README.md` to point to export command as canonical.
-- [ ] Update `docs/elixir_svd_decomposition.md` to separate math/export/runtime.
-- [ ] Update `docs/production_qwen_slm_profile.md` for adapted profile.
+- [x] Update `README.md` to point to export command as canonical.
+- [x] Update `docs/elixir_svd_decomposition.md` to separate math/export/runtime.
+- [x] Update `docs/production_qwen_slm_profile.md` for adapted profile.
 - [ ] Document export run time after first successful canonical export.
 - [ ] Document resume/failure recovery.
 
