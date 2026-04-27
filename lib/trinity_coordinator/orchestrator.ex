@@ -37,6 +37,7 @@ defmodule TrinityCoordinator.Orchestrator do
   - `:roles` – optional role-map for index->name decoding.
   - `:num_agents` – number of agent logits in the coordination head.
   - `:num_roles` – number of role logits in the coordination head.
+  - `:route_opts` – optional `CoordinationHead.route/6` selection options.
   - `:trace` – trace options (enabled, sink, run_id, content).
   """
   def run_loop(pid, model, params, opts \\ [])
@@ -63,7 +64,8 @@ defmodule TrinityCoordinator.Orchestrator do
       num_agents: num_agents,
       num_roles: num_roles,
       mock_agent_fn: Keyword.get(opts, :mock_agent_fn),
-      extractor_fn: Keyword.get(opts, :extractor_fn)
+      extractor_fn: Keyword.get(opts, :extractor_fn),
+      route_opts: Keyword.get(opts, :route_opts, [])
     }
 
     runtime_metadata = build_runtime_metadata(opts[:slm_context])
@@ -157,7 +159,8 @@ defmodule TrinityCoordinator.Orchestrator do
              params,
              extraction.vector,
              run_ctx.num_agents,
-             run_ctx.num_roles
+             run_ctx.num_roles,
+             run_ctx.route_opts
            ),
          :ok <- emit_route_trace(trace, route, extraction.vector, run_ctx.roles, turn),
          role_name = role_name_for(run_ctx.roles, route.role_id),
@@ -185,7 +188,8 @@ defmodule TrinityCoordinator.Orchestrator do
           %Verifier{status: :revised, raw: response_text, token: nil, diagnosis: nil}
         end
 
-      accepted? = verifier_result.status == :accepted
+      verifier_status = Verifier.safe_status(verifier_result)
+      accepted? = verifier_status == :accepted
 
       emit_trace(
         trace,
@@ -195,8 +199,10 @@ defmodule TrinityCoordinator.Orchestrator do
           provider: dispatch.provider,
           provider_model: dispatch.provider_model,
           provider_mode: dispatch.mode,
+          mock: dispatch.mode == :mock,
           selected_agent: route.agent_id,
           selected_role: route.role_id,
+          selected_role_name: role_name,
           response_hash: Trace.Hash.text(response_text),
           status: :ok,
           dispatch_started: dispatch_started
@@ -212,6 +218,7 @@ defmodule TrinityCoordinator.Orchestrator do
         provider: dispatch.provider,
         provider_model: dispatch.provider_model,
         provider_mode: dispatch.mode,
+        mock: dispatch.mode == :mock,
         response_hash: Trace.Hash.text(response_text),
         selected_agent_logits: Nx.to_flat_list(route.agent_logits),
         selected_role_logits: Nx.to_flat_list(route.role_logits),
@@ -219,8 +226,10 @@ defmodule TrinityCoordinator.Orchestrator do
         vector_shape: extraction.vector_shape,
         hidden_state_shape: extraction.hidden_state_shape,
         vector_backend: Runtime.tensor_backend(extraction.vector),
-        verifier_status: verifier_result.status,
-        verifier_diagnosis_hash: diagnosis_hash(verifier_result)
+        verifier_parse_status: verifier_result.status,
+        verifier_status: verifier_status,
+        verifier_diagnosis_hash: diagnosis_hash(verifier_result),
+        final: accepted?
       })
 
       if accepted? do
@@ -241,6 +250,8 @@ defmodule TrinityCoordinator.Orchestrator do
           :provider_called,
           %{
             turn: turn,
+            provider_mode: if(run_ctx.mock_agent_fn, do: :mock, else: :live),
+            mock: not is_nil(run_ctx.mock_agent_fn),
             status: :error,
             error: inspect(reason)
           }
@@ -278,6 +289,7 @@ defmodule TrinityCoordinator.Orchestrator do
           provider_max_tokens: preview.provider_max_tokens,
           provider_temperature: preview.provider_temperature,
           provider_mode: preview.mode,
+          mock: preview.mode == :mock,
           selected_agent: route.agent_id,
           selected_role: route.role_id,
           selected_role_name: role_name,
@@ -407,9 +419,18 @@ defmodule TrinityCoordinator.Orchestrator do
       role_logits: Nx.to_flat_list(route.role_logits),
       selected_agent: route.agent_id,
       selected_role: role_name_for(roles, route.role_id),
-      selected_role_id: route.role_id
+      selected_role_id: route.role_id,
+      agent_selection_mode: Map.get(route, :agent_selection_mode, :argmax),
+      role_selection_mode: Map.get(route, :role_selection_mode, :argmax),
+      selection_temperature: Map.get(route, :selection_temperature),
+      selection_seed: Map.get(route, :selection_seed),
+      agent_probabilities: tensor_to_list_or_nil(Map.get(route, :agent_probabilities)),
+      role_probabilities: tensor_to_list_or_nil(Map.get(route, :role_probabilities))
     })
   end
+
+  defp tensor_to_list_or_nil(%Nx.Tensor{} = tensor), do: Nx.to_flat_list(tensor)
+  defp tensor_to_list_or_nil(nil), do: nil
 
   defp emit_turn_completed(trace, fields), do: emit_trace(trace, :turn_completed, fields)
 

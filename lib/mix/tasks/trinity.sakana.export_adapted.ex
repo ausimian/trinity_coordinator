@@ -3,17 +3,14 @@ defmodule Mix.Tasks.Trinity.Sakana.ExportAdapted do
   Export Sakana-adapted Qwen tensors and router head.
 
       XLA_TARGET=cuda12 mix trinity.sakana.export_adapted
+      XLA_TARGET=cuda12 mix trinity.sakana.export_adapted --dry-run
   """
 
   use Mix.Task
 
-  alias TrinityCoordinator.Sakana.{Artifact, Exporter}
+  alias TrinityCoordinator.Sakana.{Artifact, ExportSpec, Exporter}
 
   @shortdoc "Exports Sakana-adapted Qwen tensors and router head"
-
-  @default_output_dir Artifact.default_output_dir()
-  @default_source_vector_path "priv/sakana_trinity/artifacts/trinity_router_es_vector.safetensors"
-  @default_source_vector_tensor "trinity_router_es_vector"
 
   @impl Mix.Task
   def run(args) do
@@ -37,6 +34,9 @@ defmodule Mix.Tasks.Trinity.Sakana.ExportAdapted do
     print_summary(options)
 
     case Exporter.export_adapted(options) do
+      {:ok, %{"status" => "dry_run"} = manifest} ->
+        print_dry_run(manifest)
+
       {:ok, manifest} ->
         print_result(manifest)
         validate_completion_or_exit!(manifest, options)
@@ -52,41 +52,52 @@ defmodule Mix.Tasks.Trinity.Sakana.ExportAdapted do
         out: :string,
         source_vector: :string,
         tensor_name: :string,
+        profile: :string,
         resume: :boolean,
         force: :boolean,
         only_index: :integer,
-        skip_existing: :boolean
+        skip_existing: :boolean,
+        dry_run: :boolean,
+        svd_compute_type: :string,
+        json: :boolean
       ]
     )
   end
 
   defp normalize_opts(opts) do
+    spec = ExportSpec.resolve!(Keyword.get(opts, :profile, "qwen3_0_6b_layer26"))
+
     [
-      out_dir: Path.expand(Keyword.get(opts, :out, @default_output_dir)),
-      source_vector_path: Keyword.get(opts, :source_vector, @default_source_vector_path),
-      source_vector_tensor: Keyword.get(opts, :tensor_name, @default_source_vector_tensor),
+      spec: spec,
+      out_dir: Path.expand(Keyword.get(opts, :out, spec.out_dir)),
+      source_vector_path: Keyword.get(opts, :source_vector, spec.source_vector_path),
+      source_vector_tensor: Keyword.get(opts, :tensor_name, spec.source_vector_tensor),
       resume: Keyword.get(opts, :resume, false),
       force: Keyword.get(opts, :force, false),
       only_index: Keyword.get(opts, :only_index, nil),
       skip_existing: Keyword.get(opts, :skip_existing, true),
-      progress: &print_progress/1
+      dry_run: Keyword.get(opts, :dry_run, false),
+      svd_compute_type: Keyword.get(opts, :svd_compute_type, "source"),
+      progress: progress_fun(Keyword.get(opts, :json, false))
     ]
   end
 
   defp validate_output_policy!(opts) do
     out_dir = Keyword.fetch!(opts, :out_dir)
 
-    case File.stat(out_dir) do
-      {:ok, %File.Stat{type: :directory}} ->
-        if not Keyword.get(opts, :resume, false) and not Keyword.get(opts, :force, false) do
-          Mix.raise("Output directory exists: #{out_dir}. Use --force or --resume to proceed.")
-        end
+    unless Keyword.get(opts, :dry_run, false) do
+      case File.stat(out_dir) do
+        {:ok, %File.Stat{type: :directory}} ->
+          if not Keyword.get(opts, :resume, false) and not Keyword.get(opts, :force, false) do
+            Mix.raise("Output directory exists: #{out_dir}. Use --force or --resume to proceed.")
+          end
 
-      {:ok, %File.Stat{type: _}} ->
-        Mix.raise("Output path exists but is not a directory: #{out_dir}")
+        {:ok, %File.Stat{type: _}} ->
+          Mix.raise("Output path exists but is not a directory: #{out_dir}")
 
-      {:error, :enoent} ->
-        :ok
+        {:error, :enoent} ->
+          :ok
+      end
     end
 
     source_path = Keyword.fetch!(opts, :source_vector_path)
@@ -97,28 +108,40 @@ defmodule Mix.Tasks.Trinity.Sakana.ExportAdapted do
   end
 
   defp validate_only_index!(nil), do: :ok
-
-  defp validate_only_index!(index) when is_integer(index) and index > 0 do
-    :ok
-  end
+  defp validate_only_index!(index) when is_integer(index) and index > 0, do: :ok
 
   defp validate_only_index!(index) do
     Mix.raise("invalid --only-index value #{inspect(index)}; expected positive integer")
   end
 
   defp print_summary(opts) do
+    spec = Keyword.fetch!(opts, :spec)
+
     IO.puts("Sakana Adapted Export")
+    IO.puts("  Export spec: #{spec.name}")
     IO.puts("  Output directory: #{Keyword.fetch!(opts, :out_dir)}")
     IO.puts("  Source vector: #{Keyword.fetch!(opts, :source_vector_path)}")
     IO.puts("  Source tensor: #{Keyword.fetch!(opts, :source_vector_tensor)}")
     IO.puts("  Resume: #{Keyword.fetch!(opts, :resume)}")
     IO.puts("  Force: #{Keyword.fetch!(opts, :force)}")
     IO.puts("  Skip existing: #{Keyword.fetch!(opts, :skip_existing)}")
+    IO.puts("  Dry run: #{Keyword.fetch!(opts, :dry_run)}")
+    IO.puts("  SVD compute type: #{Keyword.fetch!(opts, :svd_compute_type)}")
 
     case Keyword.fetch!(opts, :only_index) do
       nil -> IO.puts("  Only index: (all)")
       index -> IO.puts("  Only index: #{index}")
     end
+  end
+
+  defp progress_fun(true), do: &print_json_progress/1
+  defp progress_fun(false), do: &print_progress/1
+
+  defp print_json_progress(event) do
+    event
+    |> normalize_for_json()
+    |> Jason.encode!()
+    |> IO.puts()
   end
 
   defp print_progress(event) do
@@ -145,6 +168,22 @@ defmodule Mix.Tasks.Trinity.Sakana.ExportAdapted do
       _ ->
         :ok
     end
+  end
+
+  defp print_dry_run(manifest) do
+    IO.puts("Dry run complete: no files written")
+    IO.puts("  Source vector shape: #{inspect(manifest["source_vector_shape"])}")
+    IO.puts("  Scale offsets shape: #{inspect(manifest["scale_offsets_shape"])}")
+    IO.puts("  Router head shape: #{inspect(manifest["router_head_shape"])}")
+    IO.puts("  Selected tensor count: #{manifest["selected_tensor_count"]}")
+    IO.puts("  Selected singular values: #{manifest["selected_singular_value_count"]}")
+    IO.puts("  Selected paths:")
+
+    Enum.each(manifest["selected_tensors"], fn entry ->
+      IO.puts(
+        "    #{entry["index"]}. #{entry["path"]} shape=#{inspect(entry["shape"])} singular=#{entry["singular_values"]} backend=#{entry["backend"]}"
+      )
+    end)
   end
 
   defp print_result(manifest) do
@@ -174,4 +213,13 @@ defmodule Mix.Tasks.Trinity.Sakana.ExportAdapted do
       Mix.raise("Export failed for one or more tensors.")
     end
   end
+
+  defp normalize_for_json(value) when is_map(value) do
+    Map.new(value, fn {key, val} -> {to_string(key), normalize_for_json(val)} end)
+  end
+
+  defp normalize_for_json(value) when is_list(value), do: Enum.map(value, &normalize_for_json/1)
+  defp normalize_for_json(value) when is_tuple(value), do: Tuple.to_list(value)
+  defp normalize_for_json(value) when is_atom(value), do: Atom.to_string(value)
+  defp normalize_for_json(value), do: value
 end

@@ -109,8 +109,29 @@ defmodule TrinityCoordinator.CoordinationHead do
 
   @doc """
   Runs the real Axon forward pass and returns route details.
+
+  The five-argument form preserves the imported Sakana runtime behavior: hard
+  argmax over agent logits and role logits.
   """
   def route(model, params, penultimate_tensor, num_agents \\ 7, num_roles \\ 3) do
+    route(model, params, penultimate_tensor, num_agents, num_roles, [])
+  end
+
+  @doc """
+  Runs the forward pass with explicit selection options.
+
+  Options:
+
+    * `:agent_selection` - `:argmax`, `:softmax`, `:softmax_argmax`, or `:sample`.
+    * `:role_selection` - `:argmax`, `:softmax`, `:softmax_argmax`, or `:sample`.
+    * `:return_probabilities` - include softmax probability tensors.
+    * `:temperature` - positive softmax temperature.
+    * `:seed` - deterministic sampling seed, either integer or `{a, b, c}`.
+
+  Defaults remain deterministic argmax for both splits.
+  """
+  def route(model, params, penultimate_tensor, num_agents, num_roles, opts) when is_list(opts) do
+    opts = normalize_route_opts!(opts)
     logits = output_logits(model, params, penultimate_tensor)
     validate_logits!(logits, num_agents, num_roles)
 
@@ -119,26 +140,157 @@ defmodule TrinityCoordinator.CoordinationHead do
     agent_logits = Nx.slice(logits_1d, [0], [num_agents])
     role_logits = Nx.slice(logits_1d, [num_agents], [num_roles])
 
-    agent_id = Nx.to_number(Nx.argmax(agent_logits))
-    role_id = Nx.to_number(Nx.argmax(role_logits))
+    agent = select_from_logits(agent_logits, opts.agent_selection, opts, :agent)
+    role = select_from_logits(role_logits, opts.role_selection, opts, :role)
 
-    if not is_integer(agent_id) or not is_integer(role_id) do
-      raise ArgumentError, "invalid argmax output from coordination head"
+    if not is_integer(agent.id) or not is_integer(role.id) do
+      raise ArgumentError, "invalid selection output from coordination head"
     end
 
     %{
-      agent_id: agent_id,
-      role_id: role_id,
+      agent_id: agent.id,
+      role_id: role.id,
       logits: logits,
       agent_logits: agent_logits,
-      role_logits: role_logits
+      role_logits: role_logits,
+      agent_selection_mode: opts.agent_selection,
+      role_selection_mode: opts.role_selection,
+      selection_temperature: opts.temperature,
+      selection_seed: opts.seed,
+      agent_probabilities: Map.get(agent, :probabilities),
+      role_probabilities: Map.get(role, :probabilities)
     }
+  end
+
+  @doc "Alias for `route/6` kept for call sites that prefer an explicit name."
+  def route_with_options(model, params, penultimate_tensor, num_agents, num_roles, opts) do
+    route(model, params, penultimate_tensor, num_agents, num_roles, opts)
   end
 
   @doc "Runs the forward pass and returns `{agent_id, role_id}`."
   def forward(model, params, penultimate_tensor, num_agents \\ 7, num_roles \\ 3) do
     route = route(model, params, penultimate_tensor, num_agents, num_roles)
     {route.agent_id, route.role_id}
+  end
+
+  defp normalize_route_opts!(opts) do
+    opts =
+      Keyword.validate!(opts,
+        agent_selection: :argmax,
+        role_selection: :argmax,
+        return_probabilities: false,
+        temperature: 1.0,
+        seed: nil
+      )
+
+    temperature = opts[:temperature]
+
+    unless is_number(temperature) and temperature > 0 do
+      raise ArgumentError, "temperature must be a positive number"
+    end
+
+    agent_selection = normalize_selection_mode!(opts[:agent_selection], :agent_selection)
+    role_selection = normalize_selection_mode!(opts[:role_selection], :role_selection)
+
+    %{
+      agent_selection: agent_selection,
+      role_selection: role_selection,
+      return_probabilities: opts[:return_probabilities],
+      temperature: temperature / 1,
+      seed: opts[:seed]
+    }
+  end
+
+  defp normalize_selection_mode!(:argmax, _key), do: :argmax
+  defp normalize_selection_mode!(:softmax, _key), do: :softmax
+  defp normalize_selection_mode!(:softmax_argmax, _key), do: :softmax
+  defp normalize_selection_mode!(:sample, _key), do: :sample
+
+  defp normalize_selection_mode!(value, key) when is_binary(value) do
+    value
+    |> String.trim()
+    |> String.downcase()
+    |> String.replace("-", "_")
+    |> String.to_atom()
+    |> normalize_selection_mode!(key)
+  end
+
+  defp normalize_selection_mode!(value, key) do
+    raise ArgumentError,
+          "#{key} must be :argmax, :softmax, :softmax_argmax, or :sample, got #{inspect(value)}"
+  end
+
+  defp select_from_logits(logits, :argmax, opts, _split) do
+    result = %{id: Nx.to_number(Nx.argmax(logits))}
+
+    if opts.return_probabilities do
+      Map.put(result, :probabilities, softmax_1d(logits, opts.temperature))
+    else
+      result
+    end
+  end
+
+  defp select_from_logits(logits, :softmax, opts, _split) do
+    probabilities = softmax_1d(logits, opts.temperature)
+    %{id: Nx.to_number(Nx.argmax(probabilities)), probabilities: probabilities}
+  end
+
+  defp select_from_logits(logits, :sample, opts, split) do
+    probabilities = softmax_1d(logits, opts.temperature)
+    id = sample_probability_index(probabilities, opts.seed, split)
+    %{id: id, probabilities: probabilities}
+  end
+
+  defp softmax_1d(logits, temperature) do
+    scaled = Nx.divide(logits, temperature)
+    shifted = Nx.subtract(scaled, Nx.reduce_max(scaled))
+    exp = Nx.exp(shifted)
+    Nx.divide(exp, Nx.sum(exp))
+  end
+
+  defp sample_probability_index(probabilities, seed, split) do
+    values = Nx.to_flat_list(probabilities)
+
+    rng_seed = normalize_sample_seed(seed, split)
+    :rand.seed(:exsss, rng_seed)
+    draw = :rand.uniform()
+
+    values
+    |> Enum.with_index()
+    |> Enum.reduce_while(0.0, fn {probability, index}, acc ->
+      next = acc + probability
+
+      if draw <= next do
+        {:halt, index}
+      else
+        {:cont, next}
+      end
+    end)
+    |> then(fn
+      value when is_integer(value) -> value
+      _ -> max(length(values) - 1, 0)
+    end)
+  end
+
+  defp normalize_sample_seed({a, b, c}, :agent)
+       when is_integer(a) and is_integer(b) and is_integer(c),
+       do: {a, b, c}
+
+  defp normalize_sample_seed({a, b, c}, :role)
+       when is_integer(a) and is_integer(b) and is_integer(c),
+       do: {a + 17, b + 31, c + 43}
+
+  defp normalize_sample_seed(nil, split),
+    do: normalize_sample_seed(System.unique_integer([:positive]), split)
+
+  defp normalize_sample_seed(seed, :agent) when is_integer(seed), do: {seed, seed + 1, seed + 2}
+
+  defp normalize_sample_seed(seed, :role) when is_integer(seed),
+    do: {seed + 17, seed + 31, seed + 43}
+
+  defp normalize_sample_seed(seed, _split) do
+    raise ArgumentError,
+          "seed must be nil, integer, or {integer, integer, integer}, got #{inspect(seed)}"
   end
 
   @doc """

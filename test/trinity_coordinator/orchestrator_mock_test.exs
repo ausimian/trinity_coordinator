@@ -88,6 +88,77 @@ defmodule TrinityCoordinator.OrchestratorMockTest do
     assert :counters.get(counter, 1) == 1
   end
 
+  test "mock loop emits extraction route provider and verifier trace events" do
+    input_dim = 4
+    num_agents = 1
+    num_roles = 3
+
+    model = CoordinationHead.build_model(input_dim, num_agents, num_roles)
+    {init_fn, _predict_fn} = Axon.build(model)
+    params = init_fn.(Nx.template({1, input_dim}, :f32), Axon.ModelState.empty())
+    params = force_role_bias(params, [0.0, 0.0, 0.0, 10.0])
+
+    extractor_fn = fn _messages, _slm_context ->
+      {:ok,
+       %{
+         vector: Nx.tensor([[0.0, 0.0, 0.0, 0.0]], type: :f32),
+         vector_shape: {1, input_dim},
+         hidden_state_shape: {1, 2, input_dim},
+         input_shapes: %{"input_ids" => {1, 2}}
+       }}
+    end
+
+    mock_agent_fn = fn :verifier, _messages, _metadata ->
+      {:ok, "ACCEPT: trace-backed verifier accepted."}
+    end
+
+    trace_path =
+      Path.join(System.tmp_dir!(), "trinity_trace_#{System.unique_integer([:positive])}.jsonl")
+
+    on_exit(fn -> File.rm(trace_path) end)
+
+    {:ok, pid} = StateManager.start_link([%{role: "user", content: "check this"}])
+
+    assert {:ok, _} =
+             Orchestrator.run_loop(pid, model, params,
+               max_turns: 1,
+               num_agents: num_agents,
+               num_roles: num_roles,
+               slm_context: :mock_context,
+               extractor_fn: extractor_fn,
+               mock_agent_fn: mock_agent_fn,
+               provider_pool: :mock,
+               route_opts: [return_probabilities: true],
+               trace: [enabled: true, sink: {:jsonl, trace_path}, run_id: "unit", content: :hash]
+             )
+
+    events =
+      trace_path
+      |> File.read!()
+      |> String.split("\n", trim: true)
+      |> Enum.map(&Jason.decode!/1)
+
+    assert Enum.any?(events, &(&1["event"] == "slm_extracted"))
+
+    route_event = Enum.find(events, &(&1["event"] == "route_selected"))
+    assert route_event["agent_selection_mode"] == "argmax"
+    assert route_event["role_selection_mode"] == "argmax"
+    assert is_list(route_event["agent_probabilities"])
+    assert is_list(route_event["role_probabilities"])
+
+    provider_event =
+      Enum.find(events, &(&1["event"] == "provider_called" and &1["status"] == "ok"))
+
+    assert provider_event["provider_mode"] == "mock"
+    assert provider_event["mock"] == true
+    assert provider_event["selected_role_name"] == "Verifier"
+
+    turn_event = Enum.find(events, &(&1["event"] == "turn_completed"))
+    assert turn_event["verifier_parse_status"] == "accepted"
+    assert turn_event["verifier_status"] == "accepted"
+    assert turn_event["final"] == true
+  end
+
   defp force_role_bias(%Axon.ModelState{} = params, values) do
     bias = Nx.tensor(values, type: :f32)
     kernel = Nx.broadcast(0.0, {4, length(values)})

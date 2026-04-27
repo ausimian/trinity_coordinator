@@ -24,6 +24,57 @@ defmodule TrinityCoordinator.Training.SepCMAES do
         }
 
   @doc """
+  Builds recombination weights for the top `mu` candidates.
+
+  `:rank_weighted` uses the standard CMA-ES logarithmic rank weighting and
+  normalizes the weights to sum to one. `:uniform` preserves the previous
+  arithmetic-mean behavior.
+  """
+  @spec recombination_weights(pos_integer(), :rank_weighted | :uniform | String.t()) ::
+          Nx.Tensor.t()
+  def recombination_weights(mu, mode \\ :rank_weighted)
+
+  def recombination_weights(mu, mode) when is_integer(mu) and mu > 0 do
+    normalized_mode = normalize_recombination_mode!(mode)
+
+    weights =
+      case normalized_mode do
+        :uniform ->
+          List.duplicate(1.0 / mu, mu)
+
+        :rank_weighted ->
+          mu_float = mu / 1
+
+          1..mu
+          |> Enum.map(fn rank -> :math.log(mu_float + 0.5) - :math.log(rank / 1) end)
+          |> normalize_positive_weights()
+      end
+
+    Nx.tensor(weights, type: :f32)
+  end
+
+  def recombination_weights(mu, _mode) do
+    raise ArgumentError, "mu must be a positive integer, got #{inspect(mu)}"
+  end
+
+  @doc "Computes a weighted mean over a `{mu, dim}` vector tensor."
+  @spec weighted_mean(Nx.Tensor.t(), Nx.Tensor.t()) :: Nx.Tensor.t()
+  def weighted_mean(top_vectors, weights) do
+    {rows, _dim} = Nx.shape(top_vectors)
+
+    unless Nx.shape(weights) == {rows} do
+      raise ArgumentError,
+            "weights shape must be {#{rows}}, got #{inspect(Nx.shape(weights))}"
+    end
+
+    normalized = Nx.divide(weights, Nx.sum(weights))
+
+    top_vectors
+    |> Nx.multiply(Nx.reshape(normalized, {rows, 1}))
+    |> Nx.sum(axes: [0])
+  end
+
+  @doc """
   Runs a seeded sep-CMA-ES loop over model parameters.
   """
   @spec train(
@@ -351,7 +402,8 @@ defmodule TrinityCoordinator.Training.SepCMAES do
       |> Enum.map(&Nx.reshape(&1.vector, {1, Nx.size(&1.vector)}))
       |> Nx.concatenate(axis: 0)
 
-    mean_vector = Nx.mean(top_vectors, axes: [0])
+    weights = recombination_weights(length(top), config.recombination)
+    mean_vector = weighted_mean(top_vectors, weights)
     best_reward = max(best_candidate.mean_reward, state.best_reward)
 
     best_vector =
@@ -366,6 +418,8 @@ defmodule TrinityCoordinator.Training.SepCMAES do
           best_candidate_id: best_candidate.id,
           best_candidate_mean_reward: best_candidate.mean_reward,
           top_candidate_ids: Enum.map(top, & &1.id),
+          recombination: normalize_recombination_mode!(config.recombination),
+          recombination_weights: Nx.to_flat_list(weights),
           sigma: state.sigma,
           evaluations_delta: eval_delta,
           provider_cost_delta_usd: provider_delta
@@ -395,6 +449,33 @@ defmodule TrinityCoordinator.Training.SepCMAES do
       best_candidate_vector_hash: Map.get(metadata, :vector_hash),
       best_candidate_model_state_hash: Map.get(metadata, :model_state_hash)
     }
+  end
+
+  defp normalize_recombination_mode!(:rank_weighted), do: :rank_weighted
+  defp normalize_recombination_mode!(:uniform), do: :uniform
+
+  defp normalize_recombination_mode!(value) when is_binary(value) do
+    value
+    |> String.trim()
+    |> String.downcase()
+    |> String.replace("-", "_")
+    |> String.to_atom()
+    |> normalize_recombination_mode!()
+  end
+
+  defp normalize_recombination_mode!(value) do
+    raise ArgumentError, "invalid recombination mode #{inspect(value)}"
+  end
+
+  defp normalize_positive_weights(weights) do
+    clipped = Enum.map(weights, &max(&1, 0.0))
+    total = Enum.sum(clipped)
+
+    if total <= 0.0 do
+      List.duplicate(1.0 / length(clipped), length(clipped))
+    else
+      Enum.map(clipped, &(&1 / total))
+    end
   end
 
   defp next_sigma(sigma, population_size),

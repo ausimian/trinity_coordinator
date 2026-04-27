@@ -7,18 +7,10 @@ defmodule TrinityCoordinator.Sakana.Exporter do
   """
 
   alias TrinityCoordinator.{Runtime, SLMProfile}
-  alias TrinityCoordinator.Sakana.{Artifact, SVD}
+  alias TrinityCoordinator.Sakana.{Artifact, ExportSpec, SVD}
 
   require Logger
 
-  @required_scale_count 9_216
-  @router_head_output_count 10
-  @default_hidden_size 1024
-  @selected_layer_indices [26]
-  @default_source_vector_path "priv/sakana_trinity/artifacts/trinity_router_es_vector.safetensors"
-  @default_source_vector_tensor "trinity_router_es_vector"
-  @default_export_backend "elixir_nx_exla_cuda"
-  @default_out_dir Artifact.default_output_dir()
   @checkpoint_name_width 4
   @complete_status "complete"
   @pending_status "pending"
@@ -33,6 +25,9 @@ defmodule TrinityCoordinator.Sakana.Exporter do
           | {:force, boolean()}
           | {:only_index, nil | pos_integer()}
           | {:skip_existing, boolean()}
+          | {:dry_run, boolean()}
+          | {:svd_compute_type, :source | :f32}
+          | {:spec, ExportSpec.t() | atom() | String.t()}
           | {:progress, (map() -> any()) | nil}
 
   @doc """
@@ -42,80 +37,158 @@ defmodule TrinityCoordinator.Sakana.Exporter do
     opts =
       Keyword.validate!(
         opts,
-        out_dir: @default_out_dir,
-        source_vector_path: @default_source_vector_path,
-        source_vector_tensor: @default_source_vector_tensor,
+        spec: ExportSpec.qwen3_0_6b_layer26(),
+        out_dir: nil,
+        source_vector_path: nil,
+        source_vector_tensor: nil,
         resume: false,
         force: false,
         only_index: nil,
         skip_existing: true,
+        dry_run: false,
+        svd_compute_type: :source,
         progress: nil
       )
       |> normalize_options()
 
     out_dir = opts[:out_dir]
 
-    emit_progress(out_dir, opts[:progress], %{
-      event: :export_started,
-      options: summarize_options(opts)
-    })
-
     result =
-      try do
-        with :ok <- validate_only_index(opts[:only_index]),
-             {:ok, out_dir, manifest_hint, profile} <- prepare_output(opts),
-             {:ok, source_vector} <- load_source_vector(opts),
-             {:ok, split} <- split_router_vector(source_vector),
-             {:ok, model_info} <- load_profile(profile),
-             {:ok, selected} <- select_tensors(model_info),
-             :ok <- validate_selection(selected, split.scale_offsets),
-             {:ok, manifest} <-
-               build_or_resume_manifest(
-                 opts,
-                 out_dir,
-                 profile,
-                 source_vector,
-                 split,
-                 selected,
-                 manifest_hint
-               ),
-             {:ok, manifest} <- export_router_head(out_dir, split.head_weights, manifest, opts),
-             {:ok, manifest} <-
-               export_tensors(out_dir, split.scale_offsets, selected, manifest, opts),
-             {:ok, manifest} <- finalize_manifest(manifest, opts[:only_index], out_dir),
-             {:ok, manifest} <- finalize_merge_if_complete(out_dir, manifest) do
-          {:ok, manifest}
+      if opts[:dry_run] do
+        run_dry_run(opts)
+      else
+        emit_progress(out_dir, opts[:progress], %{
+          event: :export_started,
+          options: summarize_options(opts)
+        })
+
+        try do
+          with :ok <- validate_only_index(opts[:only_index]),
+               {:ok, out_dir, manifest_hint, profile} <- prepare_output(opts),
+               {:ok, source_vector} <- load_source_vector(opts),
+               {:ok, split} <- split_router_vector(source_vector, opts[:spec]),
+               {:ok, model_info} <- load_profile(profile),
+               {:ok, selected} <- select_tensors(model_info, opts[:spec]),
+               :ok <- validate_selection(selected, split.scale_offsets, opts[:spec]),
+               {:ok, manifest} <-
+                 build_or_resume_manifest(
+                   opts,
+                   out_dir,
+                   profile,
+                   source_vector,
+                   split,
+                   selected,
+                   manifest_hint
+                 ),
+               {:ok, manifest} <- export_router_head(out_dir, split.head_weights, manifest, opts),
+               {:ok, manifest} <-
+                 export_tensors(out_dir, split.scale_offsets, selected, manifest, opts),
+               {:ok, manifest} <- finalize_manifest(manifest, opts[:only_index], out_dir),
+               {:ok, manifest} <- finalize_merge_if_complete(out_dir, manifest) do
+            {:ok, manifest}
+          end
+        rescue
+          e ->
+            {:error, {:export_exception, Exception.message(e)}}
         end
-      rescue
-        e ->
-          {:error, {:export_exception, Exception.message(e)}}
       end
 
     case result do
       {:ok, manifest} = ok ->
-        emit_progress(out_dir, opts[:progress], %{
-          event: :export_finished,
-          status: manifest["status"]
-        })
+        unless opts[:dry_run] do
+          emit_progress(out_dir, opts[:progress], %{
+            event: :export_finished,
+            status: manifest["status"]
+          })
+        end
 
         ok
 
       {:error, reason} ->
-        emit_progress(out_dir, opts[:progress], %{event: :export_failed, reason: reason})
+        unless opts[:dry_run] do
+          emit_progress(out_dir, opts[:progress], %{event: :export_failed, reason: reason})
+        end
+
         {:error, reason}
     end
   end
 
   defp normalize_options(opts) do
-    out_dir = Path.expand(opts[:out_dir])
+    spec = ExportSpec.resolve!(opts[:spec])
+
+    source_vector_path = opts[:source_vector_path] || spec.source_vector_path
+    source_vector_tensor = opts[:source_vector_tensor] || spec.source_vector_tensor
+    out_dir = opts[:out_dir] || spec.out_dir
 
     force = opts[:force]
     resume = opts[:resume] && !force
 
     opts
-    |> Keyword.put(:out_dir, out_dir)
+    |> Keyword.put(:spec, spec)
+    |> Keyword.put(:source_vector_path, source_vector_path)
+    |> Keyword.put(:source_vector_tensor, source_vector_tensor)
+    |> Keyword.put(:out_dir, Path.expand(out_dir))
     |> Keyword.put(:force, force)
     |> Keyword.put(:resume, resume)
+    |> Keyword.put(:svd_compute_type, normalize_svd_compute_type!(opts[:svd_compute_type]))
+  end
+
+  defp normalize_svd_compute_type!(:source), do: :source
+  defp normalize_svd_compute_type!("source"), do: :source
+  defp normalize_svd_compute_type!(:f32), do: :f32
+  defp normalize_svd_compute_type!("f32"), do: :f32
+
+  defp normalize_svd_compute_type!(other) do
+    raise ArgumentError, "svd_compute_type must be :source or :f32, got #{inspect(other)}"
+  end
+
+  defp profile_for_spec(%ExportSpec{} = spec) do
+    SLMProfile.qwen_coordinator()
+    |> Map.put(:repo, {:hf, spec.base_model_repo})
+    |> Map.put(:module, spec.bumblebee_module)
+    |> Map.put(:architecture, spec.architecture)
+    |> Map.put(:expected_hidden_size, spec.hidden_size)
+    |> Map.put(:xla_target, spec.xla_target)
+  end
+
+  defp run_dry_run(opts) do
+    try do
+      profile = profile_for_spec(opts[:spec])
+
+      with :ok <- validate_only_index(opts[:only_index]),
+           {:ok, source_vector} <- load_source_vector(opts),
+           {:ok, split} <- split_router_vector(source_vector, opts[:spec]),
+           {:ok, model_info} <- load_profile(profile),
+           {:ok, selected} <- select_tensors(model_info, opts[:spec]),
+           :ok <- validate_selection(selected, split.scale_offsets, opts[:spec]) do
+        {:ok,
+         %{
+           "status" => "dry_run",
+           "export_complete" => false,
+           "dry_run" => true,
+           "export_spec" => ExportSpec.to_map(opts[:spec]),
+           "source_vector_shape" => Tuple.to_list(Nx.shape(source_vector)),
+           "scale_offsets_shape" => Tuple.to_list(Nx.shape(split.scale_offsets)),
+           "router_head_shape" => Tuple.to_list(Nx.shape(split.head_weights)),
+           "selected_tensor_count" => length(selected),
+           "selected_singular_value_count" => SVD.singular_value_count(selected),
+           "selected_tensors" =>
+             selected
+             |> Enum.with_index(1)
+             |> Enum.map(fn {entry, index} ->
+               %{
+                 "index" => index,
+                 "path" => entry.path,
+                 "shape" => Tuple.to_list(Nx.shape(entry.tensor)),
+                 "singular_values" => entry_singular_count(entry),
+                 "backend" => Runtime.tensor_backend(entry.tensor)
+               }
+             end)
+         }}
+      end
+    rescue
+      e -> {:error, {:dry_run_exception, Exception.message(e)}}
+    end
   end
 
   defp prepare_output(opts) do
@@ -134,13 +207,13 @@ defmodule TrinityCoordinator.Sakana.Exporter do
         File.rm_rf(out_dir)
         File.mkdir_p!(out_dir)
         File.mkdir_p!(Artifact.checkpoint_path(out_dir))
-        {:ok, out_dir, nil, SLMProfile.qwen_coordinator()}
+        {:ok, out_dir, nil, profile_for_spec(opts[:spec])}
 
       File.exists?(out_dir) ->
         case Artifact.load_manifest(out_dir) do
           {:ok, manifest} when resume ->
             File.mkdir_p!(Artifact.checkpoint_path(out_dir))
-            {:ok, out_dir, manifest, SLMProfile.qwen_coordinator()}
+            {:ok, out_dir, manifest, profile_for_spec(opts[:spec])}
 
           {:ok, _manifest} ->
             {:error, :output_dir_already_exists_without_resume}
@@ -155,7 +228,7 @@ defmodule TrinityCoordinator.Sakana.Exporter do
       true ->
         File.mkdir_p!(out_dir)
         File.mkdir_p!(Artifact.checkpoint_path(out_dir))
-        {:ok, out_dir, nil, SLMProfile.qwen_coordinator()}
+        {:ok, out_dir, nil, profile_for_spec(opts[:spec])}
     end
   end
 
@@ -186,8 +259,8 @@ defmodule TrinityCoordinator.Sakana.Exporter do
     end
   end
 
-  defp split_router_vector(vector) do
-    expected = @required_scale_count + @router_head_output_count * @default_hidden_size
+  defp split_router_vector(vector, %ExportSpec{} = spec) do
+    expected = ExportSpec.source_vector_size(spec)
 
     case Nx.shape(vector) do
       {size} when size == expected ->
@@ -195,9 +268,9 @@ defmodule TrinityCoordinator.Sakana.Exporter do
           {:ok,
            SVD.split_router_vector(
              vector,
-             @required_scale_count,
-             @default_hidden_size,
-             @router_head_output_count
+             spec.scale_offset_count,
+             spec.hidden_size,
+             ExportSpec.output_count(spec)
            )}
         rescue
           e ->
@@ -209,12 +282,12 @@ defmodule TrinityCoordinator.Sakana.Exporter do
     end
   end
 
-  defp select_tensors(model_info) do
+  defp select_tensors(model_info, %ExportSpec{} = spec) do
     try do
       selected =
         SVD.decomposable_tensor_entries(
           model_info.params,
-          path_filter: SVD.layer_index_filter(@selected_layer_indices)
+          path_filter: SVD.layer_index_filter(spec.selected_layer_indices)
         )
 
       {:ok, selected}
@@ -224,7 +297,7 @@ defmodule TrinityCoordinator.Sakana.Exporter do
     end
   end
 
-  defp validate_selection(selected, scale_offsets) do
+  defp validate_selection(selected, scale_offsets, %ExportSpec{} = spec) do
     singular_total = SVD.singular_value_count(selected)
     scale_count = Nx.size(scale_offsets)
 
@@ -232,11 +305,13 @@ defmodule TrinityCoordinator.Sakana.Exporter do
       length(selected) == 0 ->
         {:error, :no_selected_tensors}
 
-      singular_total != @required_scale_count ->
-        {:error, {:invalid_selection, %{expected: @required_scale_count, actual: singular_total}}}
+      singular_total != spec.scale_offset_count ->
+        {:error,
+         {:invalid_selection, %{expected: spec.scale_offset_count, actual: singular_total}}}
 
-      scale_count != @required_scale_count ->
-        {:error, {:invalid_scale_count, %{expected: @required_scale_count, actual: scale_count}}}
+      scale_count != spec.scale_offset_count ->
+        {:error,
+         {:invalid_scale_count, %{expected: spec.scale_offset_count, actual: scale_count}}}
 
       true ->
         :ok
@@ -326,39 +401,42 @@ defmodule TrinityCoordinator.Sakana.Exporter do
     |> Map.put("checkpoint_sha256", nil)
   end
 
-  defp manifest_seed(opts, _out_dir, profile, source_vector, split, selected) do
+  defp manifest_seed(opts, _out_dir, _profile, source_vector, split, selected) do
     now = now_iso8601()
     source_vector_sha256 = Artifact.file_sha256!(opts[:source_vector_path])
+
+    spec = opts[:spec]
 
     %{
       "artifact_version" => Artifact.manifest_version(),
       "status" => @pending_status,
       "created_at" => now,
       "updated_at" => now,
-      "base_model_repo" => base_model_repo(profile),
-      "bumblebee_module" => inspect(profile.module),
-      "architecture" => Atom.to_string(profile.architecture),
-      "xla_target" => profile.xla_target,
-      "export_backend" => @default_export_backend,
+      "base_model_repo" => spec.base_model_repo,
+      "bumblebee_module" => inspect(spec.bumblebee_module),
+      "architecture" => Atom.to_string(spec.architecture),
+      "xla_target" => spec.xla_target,
+      "export_backend" => spec.export_backend,
+      "export_spec" => ExportSpec.to_map(spec),
       "source_vector_path" => opts[:source_vector_path],
       "source_vector_tensor" => opts[:source_vector_tensor],
       "source_vector_shape" => Tuple.to_list(Nx.shape(source_vector)),
       "source_vector_sha256" => source_vector_sha256,
-      "scale_offset_count" => @required_scale_count,
-      "router_head_shape" => [@router_head_output_count, @default_hidden_size],
+      "scale_offset_count" => spec.scale_offset_count,
+      "router_head_shape" => [ExportSpec.output_count(spec), spec.hidden_size],
       "router_head_artifact" => Artifact.router_head_file(),
-      "router_head_tensor_key" => Artifact.router_head_tensor_key(),
+      "router_head_tensor_key" => spec.router_head_tensor_key,
       "adapted_tensors_artifact" => Artifact.adapted_tensors_file(),
       "artifact_layout" => Artifact.artifact_layout_checkpoint_directory(),
       "selected_tensor_count" => length(selected),
       "selected_singular_value_count" => SVD.singular_value_count(selected),
       "export_complete" => false,
       "partial_debug_only" => false,
-      "selected_tensors" => build_selected_tensors(selected),
+      "selected_tensors" => build_selected_tensors(selected, opts[:svd_compute_type]),
       "source_split" => %{
-        "scale_count" => @required_scale_count,
-        "hidden_size" => @default_hidden_size,
-        "output_count" => @router_head_output_count
+        "scale_count" => spec.scale_offset_count,
+        "hidden_size" => spec.hidden_size,
+        "output_count" => ExportSpec.output_count(spec)
       },
       "split" => %{
         "scale_count" => split.scale_count,
@@ -367,7 +445,7 @@ defmodule TrinityCoordinator.Sakana.Exporter do
     }
   end
 
-  defp build_selected_tensors(selected) do
+  defp build_selected_tensors(selected, svd_compute_type) do
     selected
     |> Enum.with_index(1)
     |> Enum.map_reduce(0, fn {entry, index}, cursor ->
@@ -381,6 +459,8 @@ defmodule TrinityCoordinator.Sakana.Exporter do
           "segments" => entry.segments,
           "shape" => Tuple.to_list(Nx.shape(entry.tensor)),
           "type" => inspect(Nx.type(entry.tensor)),
+          "source_type" => inspect(Nx.type(entry.tensor)),
+          "svd_compute_type" => Atom.to_string(svd_compute_type),
           "status" => @pending_status,
           "offset_start" => cursor,
           "offset_end" => cursor + count,
@@ -413,16 +493,9 @@ defmodule TrinityCoordinator.Sakana.Exporter do
     Nx.shape(entry.tensor) |> Tuple.to_list() |> Enum.min()
   end
 
-  defp base_model_repo(profile) do
-    case profile.repo do
-      {:hf, repo} -> to_string(repo)
-      repo -> to_string(repo)
-    end
-  end
-
   defp export_router_head(out_dir, head_weights, manifest, opts) do
     head_path = Path.join(out_dir, Artifact.router_head_file())
-    head_key = Artifact.router_head_tensor_key()
+    head_key = manifest["router_head_tensor_key"] || Artifact.router_head_tensor_key()
 
     with :ok <- File.mkdir_p(out_dir) do
       if opts[:skip_existing] && File.exists?(head_path) do
@@ -550,7 +623,7 @@ defmodule TrinityCoordinator.Sakana.Exporter do
                    source_tensor,
                    entry,
                    scale_offsets,
-                   opts[:progress]
+                   opts
                  ) do
               {:ok, entry_update} ->
                 updated =
@@ -646,7 +719,9 @@ defmodule TrinityCoordinator.Sakana.Exporter do
   defp normalize_shape(shape) when is_tuple(shape), do: shape
   defp normalize_shape(_), do: nil
 
-  defp export_tensor(out_dir, source_tensor, entry, scale_offsets, progress_fun) do
+  defp export_tensor(out_dir, source_tensor, entry, scale_offsets, opts) do
+    progress_fun = opts[:progress]
+
     emit_progress(out_dir, progress_fun, %{
       event: :tensor_export_started,
       index: entry["index"],
@@ -657,7 +732,8 @@ defmodule TrinityCoordinator.Sakana.Exporter do
     singular_count = entry["singular_values"]
     offsets = Nx.slice(scale_offsets, [offset_start], [singular_count])
 
-    with {:ok, decomposition, decompose_ms} <- timed_decompose(source_tensor),
+    with {:ok, decomposition, decompose_ms, decompose_source} <-
+           timed_decompose(source_tensor, opts[:svd_compute_type]),
          :ok <- ensure_cuda_backend(decomposition.u, entry["path"]),
          :ok <- ensure_cuda_backend(decomposition.s, entry["path"]),
          :ok <- ensure_cuda_backend(decomposition.v, entry["path"]),
@@ -694,6 +770,15 @@ defmodule TrinityCoordinator.Sakana.Exporter do
          "decompose_elapsed_ms" => decompose_ms,
          "reconstruct_elapsed_ms" => reconstruct_ms,
          "checkpoint_sha256" => checksum,
+         "svd_compute_type" => Atom.to_string(opts[:svd_compute_type]),
+         "decompose_source_type" => inspect(Nx.type(decompose_source)),
+         "reconstructed_type_before_cast" =>
+           inspect(
+             Nx.type(
+               SVD.reconstruct(decomposition, Nx.as_type(offsets, Nx.type(decomposition.s)))
+             )
+           ),
+         "checkpoint_type" => inspect(Nx.type(adapted_tensor)),
          "u_backend" => Runtime.tensor_backend(decomposition.u),
          "s_backend" => Runtime.tensor_backend(decomposition.s),
          "v_backend" => Runtime.tensor_backend(decomposition.v),
@@ -706,12 +791,25 @@ defmodule TrinityCoordinator.Sakana.Exporter do
     end
   end
 
-  defp timed_decompose(tensor) do
+  defp timed_decompose(tensor, :source) do
     try do
       start = monotonic_us()
       decomposition = SVD.decompose_tensor(tensor)
       elapsed = elapsed_ms(start)
-      {:ok, decomposition, elapsed}
+      {:ok, decomposition, elapsed, tensor}
+    rescue
+      e ->
+        {:error, {:decompose_error, Exception.message(e)}}
+    end
+  end
+
+  defp timed_decompose(tensor, :f32) do
+    try do
+      start = monotonic_us()
+      decompose_source = Nx.as_type(tensor, :f32)
+      decomposition = SVD.decompose_tensor(decompose_source)
+      elapsed = elapsed_ms(start)
+      {:ok, decomposition, elapsed, decompose_source}
     rescue
       e ->
         {:error, {:decompose_error, Exception.message(e)}}
@@ -930,7 +1028,10 @@ defmodule TrinityCoordinator.Sakana.Exporter do
       resume: Keyword.get(opts, :resume, false),
       force: Keyword.get(opts, :force, false),
       only_index: Keyword.get(opts, :only_index),
-      skip_existing: Keyword.get(opts, :skip_existing, true)
+      skip_existing: Keyword.get(opts, :skip_existing, true),
+      dry_run: Keyword.get(opts, :dry_run, false),
+      svd_compute_type: Keyword.get(opts, :svd_compute_type, :source),
+      spec: ExportSpec.to_map(Keyword.fetch!(opts, :spec))
     }
   end
 

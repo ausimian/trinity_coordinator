@@ -11,7 +11,8 @@ defmodule TrinityCoordinator.Training.SepCMAES.Config do
           stop_threshold: float(),
           evaluation_budget: pos_integer() | nil,
           provider_budget_usd: float() | nil,
-          cancellation_fn: (-> boolean) | nil
+          cancellation_fn: (-> boolean) | nil,
+          recombination: :rank_weighted | :uniform
         }
 
   defstruct population_size: 32,
@@ -23,7 +24,8 @@ defmodule TrinityCoordinator.Training.SepCMAES.Config do
             stop_threshold: 1.0,
             evaluation_budget: nil,
             provider_budget_usd: nil,
-            cancellation_fn: nil
+            cancellation_fn: nil,
+            recombination: :rank_weighted
 
   @doc "Builds and validates a config struct."
   @spec new(keyword() | map() | t()) :: {:ok, t()} | {:error, term()}
@@ -50,7 +52,8 @@ defmodule TrinityCoordinator.Training.SepCMAES.Config do
          :ok <- validate_top_candidates_bounds(config.population_size, config.top_candidates),
          :ok <- validate_optional_budget(config.evaluation_budget),
          :ok <- validate_optional_budget(config.provider_budget_usd),
-         :ok <- validate_cancellation_fn(config.cancellation_fn) do
+         :ok <- validate_cancellation_fn(config.cancellation_fn),
+         :ok <- validate_recombination(config.recombination) do
       {:ok, config}
     end
   end
@@ -85,4 +88,18 @@ defmodule TrinityCoordinator.Training.SepCMAES.Config do
   defp validate_cancellation_fn(nil), do: :ok
   defp validate_cancellation_fn(fnc) when is_function(fnc, 0), do: :ok
   defp validate_cancellation_fn(_), do: {:error, :invalid_cancellation_fn}
+
+  defp validate_recombination(:rank_weighted), do: :ok
+  defp validate_recombination(:uniform), do: :ok
+
+  defp validate_recombination(value) when is_binary(value) do
+    value
+    |> String.trim()
+    |> String.downcase()
+    |> String.replace("-", "_")
+    |> String.to_atom()
+    |> validate_recombination()
+  end
+
+  defp validate_recombination(_), do: {:error, :invalid_recombination}
 end

@@ -40,4 +40,12 @@ defmodule TrinityCoordinator.VerifierTest do
     assert parsed.token == "DONE"
     assert parsed.diagnosis == "verified"
   end
+
+  test "unknown verifier text is non-accepting and safe revised" do
+    parsed = Verifier.parse("looks okay maybe")
+
+    assert parsed.status == :unknown
+    assert Verifier.safe_status(parsed) == :revised
+    refute Verifier.accepted?("Verifier", "looks okay maybe")
+  end
 end

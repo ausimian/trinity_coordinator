@@ -89,10 +89,22 @@ defmodule TrinityCoordinator.Verifier do
   def accepted?(role, text, opts \\ [])
 
   def accepted?(role, text, opts) when is_binary(text) and is_list(opts) do
-    verifier_role?(role) and parse(text, opts).status == :accepted
+    verifier_role?(role) and safe_status(parse(text, opts)) == :accepted
   end
 
   def accepted?(_role, _text, _opts), do: false
+
+  @doc """
+  Converts unknown verifier output into the safe non-accepting control status.
+
+  The parser preserves `:unknown` for diagnostics, but loop control, reward
+  shaping, and benchmark summaries should treat unknown verifier text as
+  revision rather than acceptance.
+  """
+  @spec safe_status(t()) :: :accepted | :revised
+  def safe_status(%__MODULE__{status: :accepted}), do: :accepted
+  def safe_status(%__MODULE__{status: :revised}), do: :revised
+  def safe_status(%__MODULE__{status: :unknown}), do: :revised
 
   @doc """
   Returns true when the role value denotes the Verifier role.
