@@ -151,6 +151,43 @@ Suggested implementation order after this baseline:
    XLA_TARGET=cuda12 mix test test/trinity_coordinator/sakana/svd_test.exs --only qwen_sakana_adapted --trace
    ```
 
+### Adapted profile runtime and recovery
+
+The adapted profile load path is `qwen_sakana_adapted` and it applies artifacts from
+`priv/sakana_trinity/adapted_qwen3_0_6b_layer26` during `SLMProfile.load_profile/1`.
+
+- `Artifact.patch_model_info!/2` validates manifest identity/shape before patching.
+- It fails fast if:
+  - manifest status is not `complete`,
+  - `export_complete != true`,
+  - or any selected tensor is not ready.
+- Set `allow_incomplete: true` only in intentionally explicit smoke checks.
+
+Canonical artifact build for this profile:
+
+```bash
+XLA_TARGET=cuda12 mix trinity.sakana.export_adapted
+```
+
+If the canonical export is interrupted, resume with:
+
+```bash
+XLA_TARGET=cuda12 mix trinity.sakana.export_adapted --resume
+```
+
+Use `--force` to intentionally discard state and rebuild:
+
+```bash
+XLA_TARGET=cuda12 mix trinity.sakana.export_adapted --force
+```
+
+If resume fails, first check:
+
+- `manifest.json` for `status`, `error`, and `selected_tensors[].status`,
+- `export.log.jsonl` for the last events (`manifest_partial`, `tensor_export_failed`,
+  `artifact_merge_failed`, etc.),
+- `source_vector_sha256` against the current source artifact.
+
 ## Model Selection Checklist
 
 Maintain and update this checklist as the profile work progresses. Before adding

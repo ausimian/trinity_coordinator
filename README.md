@@ -434,11 +434,42 @@ Resumption policy:
   (`status`, tensor shape, tensor type, and checksum must all match).
 - `--force` removes and recreates the output directory, then performs a clean run.
 - For repeated smoke checks, use `--only-index 1`.
+- The command also writes `export.log.jsonl` in the output directory. It includes
+  `export_started`, per-tensor `tensor_export_*`, merge, and completion/failure
+  events with an `event_time_utc` timestamp, so partial runs remain auditable.
+
+Runtime and recovery notes:
+
+- Canonical profile path expects a complete manifest:
+  `manifest["status"] == "complete"` and `manifest["export_complete"] == true`.
+- If an export fails, rerun with `--resume` to continue from verified
+  checkpoints. `--resume` always validates manifest identity and requires it to
+  match the same source vector, profile, and tensor selection.
+- If identity changed or any required source file changed (e.g. vector path),
+  `--resume` aborts with an explicit resume-blocking error.
+- If recovery is unreliable, use `--force` to remove prior state and rebuild from
+  scratch.
+
+To inspect failure state manually:
+
+- open `manifest.json` for machine-readable state, especially `status`,
+  `selected_tensors[].status`, and any `error` fields;
+- open `export.log.jsonl` for the latest event sequence.
 
 Canonical smoke commands:
 
 - `XLA_TARGET=cuda12 mix trinity.sakana.export_adapted --only-index 1 --force`
 - `XLA_TARGET=cuda12 mix trinity.sakana.export_adapted --resume --only-index 1`
+
+Canonical full export profile command:
+
+```bash
+XLA_TARGET=cuda12 mix trinity.sakana.export_adapted
+```
+
+Use this to materialize all `9` selected tensors and merge
+`adapted_tensors.safetensors` (status becomes `complete` when all checkpoints are
+written and merged).
 
 ## Testing
 

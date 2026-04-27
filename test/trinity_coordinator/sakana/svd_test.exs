@@ -244,6 +244,62 @@ defmodule TrinityCoordinator.Sakana.SVDTest do
     tensors = Safetensors.read!(checkpoint_path)
     assert map_size(tensors) == 1
     assert Map.has_key?(tensors, completed["artifact_key"])
+
+    events = load_export_log_events(out_dir)
+    assert Enum.any?(events, &(&1["event"] == "export_started"))
+    assert Enum.any?(events, &(&1["event"] == "tensor_export_started"))
+    assert Enum.any?(events, &(&1["event"] == "tensor_export_finished"))
+    assert Enum.any?(events, &(&1["event"] == "manifest_partial"))
+  end
+
+  @tag :expensive_qwen_svd
+  @tag timeout: 30 * 60 * 1000
+  test "resume refuses mismatched manifest identity" do
+    Runtime.put_cuda_backend!()
+
+    out_dir =
+      Path.join(
+        System.tmp_dir!(),
+        "trinity_sakana_identity_mismatch_#{System.unique_integer([:positive])}"
+      )
+
+    on_exit(fn ->
+      File.rm_rf(out_dir)
+    end)
+
+    assert {:ok, manifest} =
+             Exporter.export_adapted(
+               out_dir: out_dir,
+               source_vector_path: @router_vector_path,
+               source_vector_tensor: "trinity_router_es_vector",
+               only_index: 1,
+               force: true,
+               skip_existing: false,
+               progress: nil
+             )
+
+    mismatched =
+      manifest
+      |> Map.put("source_vector_path", "/this/path/is/not/the/real/source.safetensors")
+      |> Map.put("source_vector_sha256", "000000")
+
+    Artifact.write_manifest!(out_dir, mismatched)
+
+    assert {:error, {:export_exception, message}} =
+             Exporter.export_adapted(
+               out_dir: out_dir,
+               source_vector_path: @router_vector_path,
+               source_vector_tensor: "trinity_router_es_vector",
+               only_index: 1,
+               resume: true,
+               skip_existing: true,
+               progress: nil
+             )
+
+    assert message =~ "existing manifest identity mismatch"
+
+    events = load_export_log_events(out_dir)
+    assert Enum.any?(events, &(&1["event"] == "export_failed"))
   end
 
   @tag :expensive_qwen_svd
@@ -499,6 +555,7 @@ defmodule TrinityCoordinator.Sakana.SVDTest do
     manifest = Map.put(manifest, "selected_singular_value_count", index_entry["singular_values"])
 
     original_path_tensor = fetch_tensor!(model_info.params, index_entry["segments"])
+
     patched_model_info =
       Artifact.patch_model_info!(model_info, out_dir,
         manifest: manifest,
@@ -506,6 +563,7 @@ defmodule TrinityCoordinator.Sakana.SVDTest do
         cast_head: false,
         patch_router_head: false
       )
+
     patched_path_tensor = fetch_tensor!(patched_model_info.params, index_entry["segments"])
 
     max_error =
@@ -620,6 +678,15 @@ defmodule TrinityCoordinator.Sakana.SVDTest do
       ArgumentError ->
         nil
     end
+  end
+
+  defp load_export_log_events(out_dir) do
+    path = Artifact.export_log_path(out_dir)
+    body = File.read!(path)
+
+    body
+    |> String.split("\n", trim: true)
+    |> Enum.map(&Jason.decode!/1)
   end
 
   defp expensive_svd_progress(%{event: :tensor_export_started} = event) do

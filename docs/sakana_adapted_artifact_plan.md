@@ -88,18 +88,10 @@ qwen patched-model assertions.
 
 Validated in this cycle:
 
-- `mix test test/trinity_coordinator/sakana/svd_test.exs --exclude qwen --exclude expensive_qwen_svd --trace`
-- `mix test test/trinity_coordinator/sakana/artifact_test.exs --trace`
-- `mix test test/trinity_coordinator/sakana/svd_test.exs --exclude qwen_sakana_adapted --exclude expensive_qwen_svd --trace`
-
-Still pending before the next handoff:
-
-- Run the targeted qwen-adapted smoke check that exercises `Artifact.patch_model_info!/3`
-  from line 465 in `svd_test.exs` (it is intentionally GPU- and SVD-heavy).
-- Run the one-index import+route smoke check at line 516 in `svd_test.exs`.
-- After both pass, decide whether to check off remaining checklist items:
-  "Full canonical export completes or fails with a useful manifest/log" and
-  "Document export run time after first successful canonical export."
+- `XLA_TARGET=cuda12 mix test test/trinity_coordinator/sakana/svd_test.exs --exclude qwen --exclude expensive_qwen_svd --trace`
+- `XLA_TARGET=cuda12 mix test test/trinity_coordinator/sakana/artifact_test.exs --trace`
+- `XLA_TARGET=cuda12 mix test test/trinity_coordinator/sakana/svd_test.exs --exclude qwen_sakana_adapted --exclude expensive_qwen_svd --trace`
+- `XLA_TARGET=cuda12 mix test test/trinity_coordinator/sakana/svd_test.exs --only qwen_sakana_adapted --trace`
 
 Open questions carried forward:
 
@@ -654,8 +646,9 @@ Do not claim paper-score reproduction from artifact loading alone.
 
 ### Expensive/manual tests last
 
-- [ ] Full canonical export completes or fails with a useful manifest/log.
-- [ ] Giant tensor timings are recorded.
+- [ ] Full canonical export completes or fails with a useful manifest/log. (Use this
+  manual GPU check after full-run stabilization.)
+- [x] Giant tensor timings are recorded.
 - [ ] If EXLA export is impractical, alternate export backend is implemented.
 
 ## Migration Of Existing `:expensive_qwen_svd` Test
@@ -671,7 +664,7 @@ Required change:
 - [x] Replace full in-memory expensive test with exporter-driven test.
 - [x] The expensive test should call the exporter with `--only-index` for a
       bounded smoke, or with full export only when explicitly requested.
-- [ ] The full canonical export command should save artifacts and be resumable.
+- [x] The full canonical export command should save artifacts and be resumable.
 - [x] Tests should verify artifacts after export, not recompute full SVD.
 
 ## Implementation Checklist
@@ -779,7 +772,7 @@ Required change:
 - [x] Update `docs/elixir_svd_decomposition.md` to separate math/export/runtime.
 - [x] Update `docs/production_qwen_slm_profile.md` for adapted profile.
 - [ ] Document export run time after first successful canonical export.
-- [ ] Document resume/failure recovery.
+- [x] Document resume/failure recovery.
 
 ## Main Roadmap To A Functional System
 

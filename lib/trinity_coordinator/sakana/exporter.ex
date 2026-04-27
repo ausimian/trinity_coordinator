@@ -53,29 +53,56 @@ defmodule TrinityCoordinator.Sakana.Exporter do
       )
       |> normalize_options()
 
-    with :ok <- validate_only_index(opts[:only_index]),
-         {:ok, out_dir, manifest_hint, profile} <- prepare_output(opts),
-         {:ok, source_vector} <- load_source_vector(opts),
-         {:ok, split} <- split_router_vector(source_vector),
-         {:ok, model_info} <- load_profile(profile),
-         {:ok, selected} <- select_tensors(model_info),
-         :ok <- validate_selection(selected, split.scale_offsets),
-         {:ok, manifest} <-
-           build_or_resume_manifest(
-             opts,
-             out_dir,
-             profile,
-             source_vector,
-             split,
-             selected,
-             manifest_hint
-           ),
-         {:ok, manifest} <- export_router_head(out_dir, split.head_weights, manifest, opts),
-         {:ok, manifest} <-
-           export_tensors(out_dir, split.scale_offsets, selected, manifest, opts),
-         {:ok, manifest} <- finalize_manifest(manifest, opts[:only_index], out_dir),
-         {:ok, manifest} <- finalize_merge_if_complete(out_dir, manifest) do
-      {:ok, manifest}
+    out_dir = opts[:out_dir]
+
+    emit_progress(out_dir, opts[:progress], %{
+      event: :export_started,
+      options: summarize_options(opts)
+    })
+
+    result =
+      try do
+        with :ok <- validate_only_index(opts[:only_index]),
+             {:ok, out_dir, manifest_hint, profile} <- prepare_output(opts),
+             {:ok, source_vector} <- load_source_vector(opts),
+             {:ok, split} <- split_router_vector(source_vector),
+             {:ok, model_info} <- load_profile(profile),
+             {:ok, selected} <- select_tensors(model_info),
+             :ok <- validate_selection(selected, split.scale_offsets),
+             {:ok, manifest} <-
+               build_or_resume_manifest(
+                 opts,
+                 out_dir,
+                 profile,
+                 source_vector,
+                 split,
+                 selected,
+                 manifest_hint
+               ),
+             {:ok, manifest} <- export_router_head(out_dir, split.head_weights, manifest, opts),
+             {:ok, manifest} <-
+               export_tensors(out_dir, split.scale_offsets, selected, manifest, opts),
+             {:ok, manifest} <- finalize_manifest(manifest, opts[:only_index], out_dir),
+             {:ok, manifest} <- finalize_merge_if_complete(out_dir, manifest) do
+          {:ok, manifest}
+        end
+      rescue
+        e ->
+          {:error, {:export_exception, Exception.message(e)}}
+      end
+
+    case result do
+      {:ok, manifest} = ok ->
+        emit_progress(out_dir, opts[:progress], %{
+          event: :export_finished,
+          status: manifest["status"]
+        })
+
+        ok
+
+      {:error, reason} ->
+        emit_progress(out_dir, opts[:progress], %{event: :export_failed, reason: reason})
+        {:error, reason}
     end
   end
 
@@ -401,15 +428,20 @@ defmodule TrinityCoordinator.Sakana.Exporter do
       if opts[:skip_existing] && File.exists?(head_path) do
         with {:ok, tensor} <- safe_read_router_head(head_path, head_key),
              :ok <- validate_router_head_shape(tensor, manifest["router_head_shape"]) do
-          emit_progress(opts[:progress], %{event: :router_head_skipped, path: head_path})
+          emit_progress(
+            out_dir,
+            opts[:progress],
+            %{event: :router_head_skipped, path: head_path, status: manifest["status"]}
+          )
+
           {:ok, manifest}
         else
           {:error, reason} ->
-            emit_progress(opts[:progress], %{
-              event: :router_head_rewrite,
-              path: head_path,
-              reason: reason
-            })
+            emit_progress(
+              out_dir,
+              opts[:progress],
+              %{event: :router_head_rewrite, path: head_path, reason: reason}
+            )
 
             write_router_head(out_dir, head_weights, head_key, manifest, opts)
         end
@@ -449,11 +481,11 @@ defmodule TrinityCoordinator.Sakana.Exporter do
       updated = Map.put(manifest, "router_head_sha256", sha)
       Artifact.write_manifest!(out_dir, updated)
 
-      emit_progress(opts[:progress], %{
-        event: :router_head_export_complete,
-        path: head_path,
-        sha256: sha
-      })
+      emit_progress(
+        out_dir,
+        opts[:progress],
+        %{event: :router_head_export_complete, path: head_path, sha256: sha}
+      )
 
       {:ok, updated}
     rescue
@@ -483,7 +515,17 @@ defmodule TrinityCoordinator.Sakana.Exporter do
             {:halt, {:error, {:missing_source_tensor, entry_path}}}
 
           should_skip_entry?(entry, out_dir, opts[:skip_existing]) ->
-            emit_progress(opts[:progress], %{event: :tensor_skipped, path: entry_path})
+            emit_progress(
+              out_dir,
+              opts[:progress],
+              %{
+                event: :tensor_skipped,
+                path: entry_path,
+                index: entry["index"],
+                index_total: length(to_process)
+              }
+            )
+
             {:cont, current}
 
           true ->
@@ -496,7 +538,20 @@ defmodule TrinityCoordinator.Sakana.Exporter do
 
             :ok = Artifact.write_manifest!(out_dir, started)
 
-            case export_tensor(out_dir, source_tensor, entry, scale_offsets, opts[:progress]) do
+            emit_progress(out_dir, opts[:progress], %{
+              event: :tensor_export_started,
+              index: entry["index"],
+              total: length(to_process),
+              path: entry_path
+            })
+
+            case export_tensor(
+                   out_dir,
+                   source_tensor,
+                   entry,
+                   scale_offsets,
+                   opts[:progress]
+                 ) do
               {:ok, entry_update} ->
                 updated =
                   started
@@ -505,7 +560,11 @@ defmodule TrinityCoordinator.Sakana.Exporter do
 
                 :ok = Artifact.write_manifest!(out_dir, updated)
 
-                emit_progress(opts[:progress], %{event: :tensor_export_finished, path: entry_path})
+                emit_progress(
+                  out_dir,
+                  opts[:progress],
+                  %{event: :tensor_export_finished, index: entry["index"], path: entry_path}
+                )
 
                 {:cont, updated}
 
@@ -520,6 +579,18 @@ defmodule TrinityCoordinator.Sakana.Exporter do
                   |> Map.put("updated_at", now_iso8601())
 
                 :ok = Artifact.write_manifest!(out_dir, updated)
+
+                emit_progress(
+                  out_dir,
+                  opts[:progress],
+                  %{
+                    event: :tensor_export_failed,
+                    index: entry["index"],
+                    path: entry_path,
+                    reason: reason
+                  }
+                )
+
                 {:halt, {:error, reason}}
             end
         end
@@ -575,8 +646,8 @@ defmodule TrinityCoordinator.Sakana.Exporter do
   defp normalize_shape(shape) when is_tuple(shape), do: shape
   defp normalize_shape(_), do: nil
 
-  defp export_tensor(out_dir, source_tensor, entry, scale_offsets, progress) do
-    emit_progress(progress, %{
+  defp export_tensor(out_dir, source_tensor, entry, scale_offsets, progress_fun) do
+    emit_progress(out_dir, progress_fun, %{
       event: :tensor_export_started,
       index: entry["index"],
       path: entry["path"]
@@ -605,13 +676,17 @@ defmodule TrinityCoordinator.Sakana.Exporter do
              entry["artifact_key"],
              adapted_tensor
            ) do
-      emit_progress(progress, %{
-        event: :tensor_export_progress,
-        index: entry["index"],
-        path: entry["path"],
-        decompose_ms: decompose_ms,
-        reconstruct_ms: reconstruct_ms
-      })
+      emit_progress(
+        out_dir,
+        progress_fun,
+        %{
+          event: :tensor_export_progress,
+          index: entry["index"],
+          path: entry["path"],
+          decompose_ms: decompose_ms,
+          reconstruct_ms: reconstruct_ms
+        }
+      )
 
       {:ok,
        %{
@@ -690,6 +765,21 @@ defmodule TrinityCoordinator.Sakana.Exporter do
         |> Map.put("export_complete", true)
         |> Map.put("updated_at", now_iso8601())
 
+      emit_progress(
+        out_dir,
+        nil,
+        %{
+          event: :manifest_complete,
+          completed:
+            length(
+              Enum.filter(
+                finalized["selected_tensors"],
+                &(Map.get(&1, "status") == @complete_status)
+              )
+            )
+        }
+      )
+
       Artifact.write_manifest!(out_dir, finalized)
       {:ok, finalized}
     else
@@ -698,16 +788,38 @@ defmodule TrinityCoordinator.Sakana.Exporter do
         |> Map.put("status", "partial")
         |> Map.put("updated_at", now_iso8601())
 
+      emit_progress(
+        out_dir,
+        nil,
+        %{
+          event: :manifest_partial,
+          completed:
+            length(
+              Enum.filter(
+                partial["selected_tensors"],
+                &(Map.get(&1, "status") == @complete_status)
+              )
+            ),
+          total: length(partial["selected_tensors"])
+        }
+      )
+
       Artifact.write_manifest!(out_dir, partial)
       {:ok, partial}
     end
   end
 
-  defp finalize_manifest(manifest, _only_index, out_dir) do
+  defp finalize_manifest(manifest, only_index, out_dir) do
     partial =
       manifest
       |> Map.put("status", "partial")
       |> Map.put("updated_at", now_iso8601())
+
+    emit_progress(
+      out_dir,
+      nil,
+      %{event: :manifest_partial_only_index, only_index: only_index}
+    )
 
     Artifact.write_manifest!(out_dir, partial)
     {:ok, partial}
@@ -715,6 +827,12 @@ defmodule TrinityCoordinator.Sakana.Exporter do
 
   defp finalize_merge_if_complete(out_dir, manifest) do
     if manifest["status"] == "complete" and all_tensors_complete?(manifest["selected_tensors"]) do
+      emit_progress(
+        out_dir,
+        nil,
+        %{event: :artifact_merge_started, selected_tensors: length(manifest["selected_tensors"])}
+      )
+
       final_path = Path.join(out_dir, Artifact.adapted_tensors_file())
       tmp = final_path <> ".tmp"
 
@@ -738,6 +856,16 @@ defmodule TrinityCoordinator.Sakana.Exporter do
           |> Map.put("adapted_tensors_sha256", Artifact.file_sha256!(final_path))
           |> Map.put("updated_at", now_iso8601())
 
+        emit_progress(
+          out_dir,
+          nil,
+          %{
+            event: :artifact_merge_complete,
+            path: final_path,
+            sha256: merged["adapted_tensors_sha256"]
+          }
+        )
+
         Artifact.write_manifest!(out_dir, merged)
         {:ok, merged}
       rescue
@@ -746,6 +874,16 @@ defmodule TrinityCoordinator.Sakana.Exporter do
             manifest
             |> Map.put("status", "failed")
             |> Map.put("updated_at", now_iso8601())
+
+          emit_progress(
+            out_dir,
+            nil,
+            %{
+              event: :artifact_merge_failed,
+              path: final_path,
+              reason: Exception.message(e)
+            }
+          )
 
           Artifact.write_manifest!(out_dir, partial)
           {:error, {:adapted_merge_error, Exception.message(e)}}
@@ -784,12 +922,52 @@ defmodule TrinityCoordinator.Sakana.Exporter do
   defp validate_only_index(index) when is_integer(index) and index > 0, do: :ok
   defp validate_only_index(_), do: {:error, {:invalid_only_index, "must be positive integer"}}
 
-  defp emit_progress(nil, _event), do: :ok
+  defp summarize_options(opts) do
+    %{
+      out_dir: Keyword.get(opts, :out_dir),
+      source_vector_path: Keyword.get(opts, :source_vector_path),
+      source_vector_tensor: Keyword.get(opts, :source_vector_tensor),
+      resume: Keyword.get(opts, :resume, false),
+      force: Keyword.get(opts, :force, false),
+      only_index: Keyword.get(opts, :only_index),
+      skip_existing: Keyword.get(opts, :skip_existing, true)
+    }
+  end
 
-  defp emit_progress(progress_fun, event) when is_function(progress_fun, 1),
-    do: progress_fun.(event)
+  defp emit_progress(nil, _progress_fun, _event), do: :ok
 
-  defp emit_progress(_, _), do: :ok
+  defp emit_progress(out_dir, progress_fun, event) when is_function(progress_fun, 1) do
+    normalized = timestamp_event(event)
+    progress_fun.(normalized)
+    log_event(out_dir, normalized)
+    :ok
+  end
+
+  defp emit_progress(out_dir, _progress_fun, event) do
+    log_event(out_dir, timestamp_event(event))
+    :ok
+  end
+
+  defp timestamp_event(event) when is_map(event) do
+    Map.put_new(event, :event_time_utc, now_iso8601())
+  end
+
+  defp log_event(nil, _event), do: :ok
+
+  defp log_event(out_dir, event) when is_binary(out_dir) and is_map(event) do
+    path = Artifact.export_log_path(out_dir)
+
+    try do
+      encoded = Jason.encode!(event)
+      File.write!(path, encoded <> "\n", [:append])
+      :ok
+    rescue
+      _ ->
+        :ok
+    end
+  end
+
+  defp log_event(_out_dir, _event), do: :ok
 
   defp now_iso8601 do
     DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601()

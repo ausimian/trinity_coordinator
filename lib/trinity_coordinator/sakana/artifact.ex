@@ -12,6 +12,7 @@ defmodule TrinityCoordinator.Sakana.Artifact do
   @router_head_file "router_head.safetensors"
   @router_head_tensor_key "trinity_router_head"
   @adapted_tensors_file "adapted_tensors.safetensors"
+  @export_log_file "export.log.jsonl"
   @checkpoint_dir_name "checkpoints"
   @artifact_layout_single_file "single_file"
   @artifact_layout_checkpoint_directory "checkpoint_directory"
@@ -61,6 +62,15 @@ defmodule TrinityCoordinator.Sakana.Artifact do
     "source_vector_shape"
   ]
 
+  @identity_selected_tensor_keys [
+    "path",
+    "artifact_key",
+    "shape",
+    "singular_values",
+    "type",
+    "segments"
+  ]
+
   @doc "Returns canonical manifest version."
   def manifest_version, do: @manifest_version
 
@@ -93,6 +103,12 @@ defmodule TrinityCoordinator.Sakana.Artifact do
 
   @doc "Returns checkpoint-directory artifact layout key."
   def artifact_layout_checkpoint_directory, do: @artifact_layout_checkpoint_directory
+
+  @doc "Returns canonical export event log file name."
+  def export_log_file, do: @export_log_file
+
+  @doc "Returns export log path in an output directory."
+  def export_log_path(out_dir), do: Path.join(out_dir, @export_log_file)
 
   @doc """
   Loads and validates manifest JSON from disk.
@@ -301,7 +317,10 @@ defmodule TrinityCoordinator.Sakana.Artifact do
     final_params =
       if opts[:patch_router_head] do
         patched_params
-        |> patch_router_head!(head_weights, cast: opts[:cast_head], transfer: opts[:head_transfer])
+        |> patch_router_head!(head_weights,
+          cast: opts[:cast_head],
+          transfer: opts[:head_transfer]
+        )
       else
         patched_params
       end
@@ -387,11 +406,30 @@ defmodule TrinityCoordinator.Sakana.Artifact do
   Checks whether the identity fields match for resume workflows.
   """
   def identity_matches?(expected, observed) when is_map(expected) and is_map(observed) do
-    Enum.all?(@identity_keys, fn key ->
-      normalize_identity_value(field(expected, key)) ==
-        normalize_identity_value(field(observed, key))
+    key_values_match? =
+      Enum.all?(@identity_keys, fn key ->
+        if key == "selected_tensors" do
+          identity_selected_tensors(field(expected, key)) ==
+            identity_selected_tensors(field(observed, key))
+        else
+          normalize_identity_value(field(expected, key)) ==
+            normalize_identity_value(field(observed, key))
+        end
+      end)
+
+    key_values_match?
+  end
+
+  defp identity_selected_tensors(entries) when is_list(entries) do
+    entries
+    |> Enum.map(fn entry ->
+      entry
+      |> Map.take(@identity_selected_tensor_keys)
+      |> Map.new(fn {key, value} -> {key, normalize_identity_value(value)} end)
     end)
   end
+
+  defp identity_selected_tensors(_entries), do: []
 
   @doc "Returns required identity keys."
   def required_identity_keys, do: @identity_keys
@@ -766,8 +804,15 @@ defmodule TrinityCoordinator.Sakana.Artifact do
   defp normalize_type(value), do: inspect(value)
 
   defp normalize_identity_value(nil), do: nil
+  defp normalize_identity_value(value) when is_list(value), do: Enum.map(value, &normalize_identity_value/1)
+  defp normalize_identity_value(value) when is_tuple(value), do: Tuple.to_list(value)
+  defp normalize_identity_value(value) when is_map(value), do: normalize_identity_value_map(value)
   defp normalize_identity_value(value) when is_atom(value), do: Atom.to_string(value)
   defp normalize_identity_value(value), do: value
+
+  defp normalize_identity_value_map(value) when is_map(value) do
+    Map.new(value, fn {key, v} -> {normalize_identity_value(key), normalize_identity_value(v)} end)
+  end
 
   defp normalize_string_keys(value) when is_map(value) do
     Map.new(value, fn {key, item} ->
