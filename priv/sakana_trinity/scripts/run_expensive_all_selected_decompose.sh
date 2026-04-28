@@ -9,6 +9,7 @@ THREADS="${THREADS:-4}"
 XLA_TARGET="${XLA_TARGET:-cuda12}"
 UV_PY=(
   uv run
+  --python 3.11
   --with torch==2.7.1
   --with transformers==4.55.2
   --with accelerate==1.6.0
@@ -26,7 +27,7 @@ mkdir -p "$OUT_ROOT"
 
 echo "[expensive-all-selected] out_root=$OUT_ROOT"
 echo "[expensive-all-selected] threads=$THREADS"
-echo "[expensive-all-selected] python runner=uv"
+echo "[expensive-all-selected] python runner=uv python 3.11"
 echo "[expensive-all-selected] this intentionally recomputes selected SVDs from Qwen"
 
 "${UV_PY[@]}" priv/sakana_trinity/scripts/debug_sakana_parity_sample.py \

@@ -10,6 +10,7 @@ THREADS="${THREADS:-4}"
 XLA_TARGET="${XLA_TARGET:-cuda12}"
 UV_PY=(
   uv run
+  --python 3.11
   --with fire==0.7.0
   --with torch==2.7.1
   --with transformers==4.55.2
@@ -29,7 +30,7 @@ mkdir -p "$OUT_ROOT"
 echo "[original-svd] model=$MODEL_NAME"
 echo "[original-svd] out_root=$OUT_ROOT"
 echo "[original-svd] threads=$THREADS"
-echo "[original-svd] python runner=uv"
+echo "[original-svd] python runner=uv python 3.11"
 
 "${UV_PY[@]}" docs/priv/trinity_code_submission/decompose_model.py \
   --model_name="$MODEL_NAME" \
