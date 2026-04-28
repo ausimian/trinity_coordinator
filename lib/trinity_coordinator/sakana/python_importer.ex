@@ -422,7 +422,7 @@ defmodule TrinityCoordinator.Sakana.PythonImporter do
     orient_for_target!(Nx.as_type(tensor, :f32), source_shape, "source_reference")
   end
 
-  defp choose_python_v_layout(_decomp, nil), do: %{layout: :nx, zero_error: nil}
+  defp choose_python_v_layout(_decomp, nil), do: %{layout: :torch_v, zero_error: nil}
 
   defp choose_python_v_layout(%{s: s} = decomp, %Nx.Tensor{} = source_reference) do
     zeros = Nx.broadcast(0.0, Nx.shape(s)) |> Nx.as_type(Nx.type(s))

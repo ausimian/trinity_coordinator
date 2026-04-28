@@ -6,10 +6,15 @@ defmodule Mix.Tasks.Trinity.Sakana.ParitySample do
         --out tmp/sakana_parity/elixir_sample_trace.json
 
   To compare against Python semantic components, first run the companion Python
-  script and pass the directory it writes:
+  script and pass the directory/report it writes:
+
+      python3 priv/sakana_trinity/scripts/debug_sakana_parity_sample.py \
+        --out tmp/sakana_parity/python_sample_trace.json \
+        --write-components-dir tmp/sakana_parity/python_components
 
       XLA_TARGET=cuda12 mix trinity.sakana.parity_sample \
         --components-dir tmp/sakana_parity/python_components \
+        --python-report tmp/sakana_parity/python_sample_trace.json \
         --out tmp/sakana_parity/elixir_sample_trace.json
   """
 
@@ -29,6 +34,7 @@ defmodule Mix.Tasks.Trinity.Sakana.ParitySample do
         strict: [
           out: :string,
           components_dir: :string,
+          python_report: :string,
           router_vector: :string,
           reference: :string,
           no_cuda: :boolean
@@ -53,6 +59,7 @@ defmodule Mix.Tasks.Trinity.Sakana.ParitySample do
             "priv/sakana_trinity/reference/sakana_python_reference_manifest.json"
           ),
         components_dir: Keyword.get(opts, :components_dir),
+        python_report_path: Keyword.get(opts, :python_report),
         require_cuda: not Keyword.get(opts, :no_cuda, false)
       )
 
@@ -65,13 +72,26 @@ defmodule Mix.Tasks.Trinity.Sakana.ParitySample do
 
   defp print_hash_summary(report) do
     expected = get_in(report, ["reference", "expected_bf16_sha256"])
-    Mix.shell().info("Expected Python bf16 hash: #{expected}")
+    python_current = get_in(report, ["python_current_baseline", "observed_bf16_sha256"])
+
+    python_reproducible =
+      get_in(report, ["python_current_baseline", "expected_hash_reproducible"])
+
+    Mix.shell().info("Stored Python bf16 hash: #{expected}")
+
+    if python_current do
+      Mix.shell().info(
+        "Current Python baseline hash: #{python_current} reproducible_stored=#{inspect(python_reproducible)}"
+      )
+    else
+      Mix.shell().info("Current Python baseline hash: (no --python-report supplied)")
+    end
 
     report
     |> Map.get("native_elixir_svd_variants", [])
     |> Enum.each(fn variant ->
       Mix.shell().info(
-        "native #{variant["label"]}: #{variant["observed_bf16_sha256"]} match=#{variant["matches_expected"]} zero_error=#{variant["zero_offset_max_abs_error_vs_source"]}"
+        "native #{variant["label"]}: #{variant["observed_bf16_sha256"]} match_stored=#{variant["matches_expected"]} match_python=#{variant["matches_python_current"]} zero_error=#{variant["zero_offset_max_abs_error_vs_source"]}"
       )
     end)
 
@@ -79,7 +99,7 @@ defmodule Mix.Tasks.Trinity.Sakana.ParitySample do
       variants when is_list(variants) ->
         Enum.each(variants, fn variant ->
           Mix.shell().info(
-            "semantic #{variant["label"]}: #{variant["observed_bf16_sha256"]} match=#{variant["matches_expected"]} zero_error=#{variant["zero_offset_max_abs_error_vs_source"]}"
+            "semantic #{variant["label"]}: #{variant["observed_bf16_sha256"]} match_stored=#{variant["matches_expected"]} match_python=#{variant["matches_python_current"]} zero_error=#{variant["zero_offset_max_abs_error_vs_source"]}"
           )
         end)
 

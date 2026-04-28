@@ -1,19 +1,21 @@
 #!/usr/bin/env python3
-"""Emit side-by-side Python checkpoints for the Sakana/TRINITY SVD sample hash.
+"""Emit Python-side checkpoints for the Sakana/TRINITY SVD sample hash.
 
-This script intentionally focuses on the single sample stored in
-priv/sakana_trinity/reference/sakana_python_reference_manifest.json.  It emits
-JSON with intermediate hashes/stats for:
+The reference manifest contains a historical bf16 SHA-256 for one adapted tensor.
+That hash is only bit-reproducible when the exact SVD components used to create
+it are available. Recomputing SVD with a different PyTorch/CUDA/LAPACK version can
+produce a mathematically valid but different singular-vector basis. Zero-offset
+reconstruction still matches the source, but non-zero singular-value scaling can
+change the adapted tensor hash.
 
-* router-vector split and sample scale offsets,
-* source tensor dtype/shape/hash,
-* torch.svd and torch.linalg.svd variants,
-* zero-offset reconstruction error,
-* scaled singular-value normalization,
-* final target-layout bf16 bytes.
+This script therefore reports both:
 
-It can also write a minimal semantic-component directory that the Elixir parity
-Mix task can read with --components-dir.
+* the stored reference hash from sakana_python_reference_manifest.json, and
+* the current Python baseline hash produced by either an explicit svd_weights.pt
+  file or by recomputing SVD in the current environment.
+
+When --write-components-dir is enabled, the component bundle includes a small
+JSON metadata file describing whether the stored reference hash was reproduced.
 """
 
 from __future__ import annotations
@@ -23,7 +25,7 @@ import hashlib
 import json
 import math
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 import numpy as np
 import torch
@@ -42,13 +44,21 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model-name", default=DEFAULT_MODEL_NAME)
     parser.add_argument("--reference", type=Path, default=DEFAULT_REFERENCE)
     parser.add_argument("--router-vector", type=Path, default=DEFAULT_ROUTER_VECTOR_NPY)
+    parser.add_argument("--svd-weights", type=Path, default=None,
+                        help="Optional original svd_weights.pt. Use this for strict historical hash reproduction; without it, SVD is recomputed in the current environment.")
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
     parser.add_argument("--write-components-dir", type=Path, default=DEFAULT_COMPONENT_DIR)
     parser.add_argument("--no-write-components", action="store_true")
     parser.add_argument("--device", default="cpu", choices=["cpu", "cuda"])
     parser.add_argument("--vector-dtype", default="float32", choices=["float32", "float64"])
-    parser.add_argument("--model-torch-dtype", default="float32", choices=["auto", "float32", "bfloat16"],
-                        help="Model weight dtype for the parity SVD. The reference was generated from the default float32 Transformers load; auto may load bf16 and intentionally produce a different hash.")
+    parser.add_argument(
+        "--model-torch-dtype",
+        default="float32",
+        choices=["auto", "float32", "bfloat16"],
+        help="Model weight dtype for parity diagnostics. The default uses float32; auto/bfloat16 intentionally test alternate provenance.",
+    )
+    parser.add_argument("--strict-reference-hash", action="store_true",
+                        help="Exit non-zero when no Python variant reproduces the stored reference hash.")
     return parser.parse_args()
 
 
@@ -66,9 +76,7 @@ def sha256_file(path: Path) -> str:
 
 def tensor_bytes(tensor: torch.Tensor) -> bytes:
     t = tensor.detach().cpu().contiguous()
-    if t.dtype == torch.bfloat16:
-        return t.view(torch.uint16).numpy().tobytes()
-    if t.dtype == torch.float16:
+    if t.dtype in (torch.bfloat16, torch.float16):
         return t.view(torch.uint16).numpy().tobytes()
     return t.numpy().tobytes()
 
@@ -113,7 +121,7 @@ def tensor_summary(tensor: torch.Tensor, prefix_count: int = 8, alt_hashes: bool
 def orient_to_shape(tensor: torch.Tensor, shape: list[int], label: str) -> torch.Tensor:
     target = tuple(int(x) for x in shape)
     if tuple(tensor.shape) == target:
-        return tensor
+        return tensor.contiguous()
     if tensor.ndim == 2 and tuple(tensor.T.shape) == target:
         return tensor.T.contiguous()
     raise ValueError(f"cannot orient {label} from {tuple(tensor.shape)} to {target}")
@@ -137,14 +145,11 @@ def load_router_vector(path: Path, dtype: str) -> np.ndarray:
     return vector.astype(np.float32 if dtype == "float32" else np.float64, copy=False)
 
 
-
-
 def load_model(model_name: str, dtype_arg: Any) -> torch.nn.Module:
-    """Load the model using the current Transformers dtype keyword.
+    """Load model weights using the current Transformers dtype keyword.
 
-    Newer Transformers versions warn that ``torch_dtype`` is deprecated in favor
-    of ``dtype``. Keep a fallback for older installations so the debug script
-    works across the dependency lane.
+    Newer Transformers versions prefer ``dtype=``. Keep a fallback for older
+    installations to avoid making the debug harness depend on one exact version.
     """
     try:
         return AutoModelForCausalLM.from_pretrained(model_name, dtype=dtype_arg)
@@ -152,7 +157,12 @@ def load_model(model_name: str, dtype_arg: Any) -> torch.nn.Module:
         return AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=dtype_arg)
 
 
-def reconstruct_from_torch_svd(u: torch.Tensor, s: torch.Tensor, v: torch.Tensor, offsets: torch.Tensor) -> tuple[torch.Tensor, dict[str, Any]]:
+def reconstruct_from_torch_v(
+    u: torch.Tensor,
+    s: torch.Tensor,
+    v: torch.Tensor,
+    offsets: torch.Tensor,
+) -> tuple[torch.Tensor, dict[str, Any]]:
     offsets = offsets.to(dtype=s.dtype, device=s.device)
     scaled_s = s * (1.0 + offsets)
     normalization = s.sum() / scaled_s.sum()
@@ -161,7 +171,12 @@ def reconstruct_from_torch_svd(u: torch.Tensor, s: torch.Tensor, v: torch.Tensor
     return reconstructed, singular_summary(s, offsets, scaled_s, normalization)
 
 
-def reconstruct_from_linalg_svd(u: torch.Tensor, s: torch.Tensor, vh: torch.Tensor, offsets: torch.Tensor) -> tuple[torch.Tensor, dict[str, Any]]:
+def reconstruct_from_vh(
+    u: torch.Tensor,
+    s: torch.Tensor,
+    vh: torch.Tensor,
+    offsets: torch.Tensor,
+) -> tuple[torch.Tensor, dict[str, Any]]:
     offsets = offsets.to(dtype=s.dtype, device=s.device)
     scaled_s = s * (1.0 + offsets)
     normalization = s.sum() / scaled_s.sum()
@@ -185,42 +200,207 @@ def max_abs_error(left: torch.Tensor, right: torch.Tensor) -> float:
     return float((left.detach().to(torch.float32) - right.detach().to(torch.float32)).abs().max().item())
 
 
-def variant_report(label: str, reconstructed: torch.Tensor, singular: dict[str, Any], source_f32: torch.Tensor, sample: dict[str, Any]) -> dict[str, Any]:
-    zero_reconstructed = reconstructed["zero"]
-    adapted_reconstructed = reconstructed["adapted"]
-    final = orient_to_shape(adapted_reconstructed.to(torch.bfloat16), sample["sample_reconstructed_shape"], label)
-    observed = tensor_sha256(final)
+def variant_report(
+    label: str,
+    zero_reconstructed: torch.Tensor,
+    adapted_reconstructed: torch.Tensor,
+    singular: dict[str, Any],
+    source_f32: torch.Tensor,
+    sample: dict[str, Any],
+    component_source: str,
+    v_layout: str,
+) -> dict[str, Any]:
+    final_f32_oriented = orient_to_shape(adapted_reconstructed, sample["sample_reconstructed_shape"], label)
+    final_bf16 = final_f32_oriented.to(torch.bfloat16).contiguous()
+    observed = tensor_sha256(final_bf16)
     expected = sample["sample_reconstructed_bf16_sha256"]
     return {
         "label": label,
+        "component_source": component_source,
+        "v_layout": v_layout,
         "zero_offset_max_abs_error_vs_source": max_abs_error(zero_reconstructed, source_f32),
         "s": singular,
-        "final": tensor_summary(final, 16),
-        "observed_bf16_sha256" : observed,
+        "final_f32_before_bf16": tensor_summary(final_f32_oriented, 16),
+        "final": tensor_summary(final_bf16, 16),
+        "observed_bf16_sha256": observed,
         "expected_bf16_sha256": expected,
         "matches_expected": observed == expected,
     }
+
+
+def dtype_arg_from_cli(value: str) -> Any:
+    if value == "auto":
+        return "auto"
+    if value == "float32":
+        return torch.float32
+    if value == "bfloat16":
+        return torch.bfloat16
+    raise ValueError(value)
+
+
+def load_svd_weight_components(path: Path, source_name: str, device: str) -> Optional[dict[str, torch.Tensor]]:
+    if path is None:
+        return None
+    if not path.exists():
+        raise FileNotFoundError(path)
+
+    loaded = torch.load(path, map_location="cpu")
+    keys = {
+        "u": f"{source_name}.U",
+        "s": f"{source_name}.S",
+        "v": f"{source_name}.V",
+    }
+    missing = [key for key in keys.values() if key not in loaded]
+    if missing:
+        raise KeyError(f"missing keys in {path}: {missing}; available sample={list(loaded.keys())[:20]}")
+    return {name: loaded[key].detach().to(device) for name, key in keys.items()}
+
+
+def build_variants(
+    source_f32: torch.Tensor,
+    offsets: torch.Tensor,
+    sample: dict[str, Any],
+    svd_components: Optional[dict[str, torch.Tensor]],
+) -> tuple[list[dict[str, Any]], dict[str, torch.Tensor], str]:
+    variants: list[dict[str, Any]] = []
+
+    # Current-environment SVD. This is useful as a local baseline, but it should
+    # not be treated as bit-identical to a historical reference hash.
+    u_svd, s_svd, v_svd = torch.svd(source_f32)
+    zeros = torch.zeros_like(s_svd)
+    zero_svd, _ = reconstruct_from_torch_v(u_svd, s_svd, v_svd, zeros)
+    adapted_svd, singular_svd = reconstruct_from_torch_v(u_svd, s_svd, v_svd, offsets.to(torch.float32))
+    variants.append(
+        variant_report(
+            "python_recomputed_torch_svd_v_final_bf16",
+            zero_svd,
+            adapted_svd,
+            singular_svd,
+            source_f32,
+            sample,
+            "recomputed_torch_svd",
+            "torch_v",
+        )
+    )
+
+    u_linalg, s_linalg, vh_linalg = torch.linalg.svd(source_f32, full_matrices=False)
+    zero_linalg, _ = reconstruct_from_vh(u_linalg, s_linalg, vh_linalg, torch.zeros_like(s_linalg))
+    adapted_linalg, singular_linalg = reconstruct_from_vh(u_linalg, s_linalg, vh_linalg, offsets.to(torch.float32))
+    variants.append(
+        variant_report(
+            "python_recomputed_linalg_svd_vh_final_bf16",
+            zero_linalg,
+            adapted_linalg,
+            singular_linalg,
+            source_f32,
+            sample,
+            "recomputed_torch_linalg_svd",
+            "vh",
+        )
+    )
+
+    component_bundle = {"u": u_svd, "s": s_svd, "v": v_svd}
+    component_source = "recomputed_torch_svd"
+
+    if svd_components is not None:
+        u_ref = svd_components["u"].to(torch.float32)
+        s_ref = svd_components["s"].to(torch.float32)
+        v_ref = svd_components["v"].to(torch.float32)
+        zeros_ref = torch.zeros_like(s_ref)
+
+        zero_ref_torch_v, _ = reconstruct_from_torch_v(u_ref, s_ref, v_ref, zeros_ref)
+        adapted_ref_torch_v, singular_ref_torch_v = reconstruct_from_torch_v(
+            u_ref, s_ref, v_ref, offsets.to(torch.float32)
+        )
+        variants.append(
+            variant_report(
+                "python_svd_weights_torch_v_final_bf16",
+                zero_ref_torch_v,
+                adapted_ref_torch_v,
+                singular_ref_torch_v,
+                source_f32,
+                sample,
+                "svd_weights_pt",
+                "torch_v",
+            )
+        )
+
+        # Defensive diagnostic: if a supplied file was produced by linalg.svd and
+        # stored Vh under .V, this variant will have much lower zero error.
+        zero_ref_vh, _ = reconstruct_from_vh(u_ref, s_ref, v_ref, zeros_ref)
+        adapted_ref_vh, singular_ref_vh = reconstruct_from_vh(u_ref, s_ref, v_ref, offsets.to(torch.float32))
+        variants.append(
+            variant_report(
+                "python_svd_weights_vh_final_bf16",
+                zero_ref_vh,
+                adapted_ref_vh,
+                singular_ref_vh,
+                source_f32,
+                sample,
+                "svd_weights_pt",
+                "vh",
+            )
+        )
+
+        component_bundle = {"u": u_ref, "s": s_ref, "v": v_ref}
+        component_source = "svd_weights_pt"
+
+    return variants, component_bundle, component_source
+
+
+def select_baseline_variant(variants: list[dict[str, Any]], expected: str, component_source: str) -> dict[str, Any]:
+    for variant in variants:
+        if variant["observed_bf16_sha256"] == expected:
+            return variant
+
+    preferred_labels = [
+        "python_svd_weights_torch_v_final_bf16" if component_source == "svd_weights_pt" else "python_recomputed_torch_svd_v_final_bf16",
+        "python_recomputed_torch_svd_v_final_bf16",
+    ]
+    for label in preferred_labels:
+        for variant in variants:
+            if variant["label"] == label:
+                return variant
+    return variants[0]
+
+
+def write_component_bundle(
+    out_dir: Path,
+    source_name: str,
+    components: dict[str, torch.Tensor],
+    offsets: torch.Tensor,
+    metadata: dict[str, Any],
+) -> None:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    safe = sanitize_key(source_name)
+    save_file(
+        {
+            f"svd.U.{safe}": components["u"].detach().cpu().contiguous(),
+            f"svd.S.{safe}": components["s"].detach().cpu().contiguous(),
+            f"svd.V.{safe}": components["v"].detach().cpu().contiguous(),
+        },
+        str(out_dir / "trinity_svf_components.safetensors"),
+    )
+    save_file(
+        {f"svf.scale_offsets.{safe}": offsets.detach().cpu().contiguous()},
+        str(out_dir / "trinity_svf_scale_offsets.safetensors"),
+    )
+    (out_dir / "trinity_svf_debug_manifest.json").write_text(json.dumps(metadata, indent=2, sort_keys=True))
 
 
 def main() -> None:
     args = parse_args()
     reference = json.loads(args.reference.read_text())
     sample = reference["sample_adapted_tensor"]
+    expected = sample["sample_reconstructed_bf16_sha256"]
+
     vector = load_router_vector(args.router_vector, args.vector_dtype)
     offset_start = int(sample["offset_start"])
     offset_end = int(sample["offset_end"])
     offset_np = vector[offset_start:offset_end].copy()
     offsets = torch.from_numpy(offset_np).to(args.device)
 
-    dtype_arg: Any
-    if args.model_torch_dtype == "auto":
-        dtype_arg = "auto"
-    elif args.model_torch_dtype == "float32":
-        dtype_arg = torch.float32
-    else:
-        dtype_arg = torch.bfloat16
-
-    model = load_model(args.model_name, dtype_arg)
+    model = load_model(args.model_name, dtype_arg_from_cli(args.model_torch_dtype))
     state_dict = model.state_dict()
     source_name = sample["source_name"]
     if source_name not in state_dict:
@@ -229,60 +409,43 @@ def main() -> None:
     source = state_dict[source_name].detach().to(args.device)
     source_f32 = source.to(torch.float32)
 
-    # torch.svd matches the legacy Sakana decompose_model.py convention most closely.
-    u_svd, s_svd, v_svd = torch.svd(source_f32)
-    zeros = torch.zeros_like(s_svd)
-    zero_svd, singular_zero_svd = reconstruct_from_torch_svd(u_svd, s_svd, v_svd, zeros)
-    adapted_svd, singular_svd = reconstruct_from_torch_svd(u_svd, s_svd, v_svd, offsets.to(torch.float32))
+    svd_components = load_svd_weight_components(args.svd_weights, source_name, args.device) if args.svd_weights else None
+    variants, component_bundle, component_source = build_variants(source_f32, offsets, sample, svd_components)
+    baseline = select_baseline_variant(variants, expected, component_source)
+    reference_hash_reproducible = any(v["matches_expected"] for v in variants)
 
-    # torch.linalg.svd emits Vh directly.  This exposes whether the reference was produced
-    # from modern linalg output or legacy torch.svd output.
-    u_linalg, s_linalg, vh_linalg = torch.linalg.svd(source_f32, full_matrices=False)
-    zero_linalg, _singular_zero_linalg = reconstruct_from_linalg_svd(u_linalg, s_linalg, vh_linalg, torch.zeros_like(s_linalg))
-    adapted_linalg, singular_linalg = reconstruct_from_linalg_svd(u_linalg, s_linalg, vh_linalg, offsets.to(torch.float32))
-
-    variants = [
-        variant_report(
-            "python_torch_svd_v_transposed_final_bf16",
-            {"zero": zero_svd, "adapted": adapted_svd},
-            singular_svd,
-            source_f32,
-            sample,
-        ),
-        variant_report(
-            "python_linalg_svd_vh_final_bf16",
-            {"zero": zero_linalg, "adapted": adapted_linalg},
-            singular_linalg,
-            source_f32,
-            sample,
-        ),
-    ]
+    component_metadata = {
+        "schema": "trinity_sakana_sample_component_debug.v1",
+        "source_name": source_name,
+        "component_source": component_source,
+        "component_v_layout": "torch_v",
+        "baseline_label": baseline["label"],
+        "baseline_observed_bf16_sha256": baseline["observed_bf16_sha256"],
+        "stored_reference_bf16_sha256": expected,
+        "stored_reference_hash_reproducible": reference_hash_reproducible,
+        "svd_weights_path": None if args.svd_weights is None else str(args.svd_weights),
+    }
 
     if not args.no_write_components:
-        args.write_components_dir.mkdir(parents=True, exist_ok=True)
-        safe = sanitize_key(source_name)
-        save_file(
-            {
-                f"svd.U.{safe}": u_svd.detach().cpu().contiguous(),
-                f"svd.S.{safe}": s_svd.detach().cpu().contiguous(),
-                f"svd.V.{safe}": v_svd.detach().cpu().contiguous(),
-            },
-            str(args.write_components_dir / "trinity_svf_components.safetensors"),
-        )
-        save_file(
-            {f"svf.scale_offsets.{safe}": offsets.detach().cpu().contiguous()},
-            str(args.write_components_dir / "trinity_svf_scale_offsets.safetensors"),
-        )
+        write_component_bundle(args.write_components_dir, source_name, component_bundle, offsets, component_metadata)
 
     report = {
-        "schema": "trinity_sakana_python_svd_parity_trace.v1",
+        "schema": "trinity_sakana_python_svd_parity_trace.v2",
         "reference": {
             "path": str(args.reference),
             "source_name": sample["source_name"],
             "elixir_name": sample["elixir_name"],
             "source_shape": sample["source_shape"],
             "sample_reconstructed_shape": sample["sample_reconstructed_shape"],
-            "expected_bf16_sha256": sample["sample_reconstructed_bf16_sha256"],
+            "expected_bf16_sha256": expected,
+            "expected_hash_reproducible": reference_hash_reproducible,
+            "current_python_baseline_label": baseline["label"],
+            "current_python_baseline_bf16_sha256": baseline["observed_bf16_sha256"],
+            "diagnosis": (
+                "stored reference hash reproduced by this Python environment"
+                if reference_hash_reproducible
+                else "stored reference hash was not reproduced; use current_python_baseline_bf16_sha256 for same-run parity, or provide the original svd_weights.pt"
+            ),
         },
         "inputs": {
             "model_name": args.model_name,
@@ -291,7 +454,9 @@ def main() -> None:
             "router_vector": str(args.router_vector),
             "router_vector_sha256": sha256_file(args.router_vector),
             "router_vector_dtype_after_load": str(vector.dtype),
+            "svd_weights": None if args.svd_weights is None else str(args.svd_weights),
             "write_components_dir": None if args.no_write_components else str(args.write_components_dir),
+            "component_source_written": None if args.no_write_components else component_source,
         },
         "source_tensor": tensor_summary(source, 16),
         "source_tensor_f32_svd_input": tensor_summary(source_f32, 16),
@@ -301,13 +466,22 @@ def main() -> None:
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(report, indent=2, sort_keys=True))
+
     print(f"wrote Python parity report: {args.out}")
     if not args.no_write_components:
         print(f"wrote sample Python components: {args.write_components_dir}")
+    print(f"stored_reference_bf16_sha256: {expected}")
+    print(f"reference_hash_reproducible: {reference_hash_reproducible}")
+    print(f"current_python_baseline: {baseline['label']} {baseline['observed_bf16_sha256']}")
     for variant in variants:
         print(
             f"{variant['label']}: {variant['observed_bf16_sha256']} "
             f"match={variant['matches_expected']} zero_error={variant['zero_offset_max_abs_error_vs_source']}"
+        )
+
+    if args.strict_reference_hash and not reference_hash_reproducible:
+        raise SystemExit(
+            "stored reference hash was not reproduced; provide --svd-weights with the original SVD components or unset --strict-reference-hash"
         )
 
 

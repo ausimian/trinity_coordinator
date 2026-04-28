@@ -53,23 +53,7 @@ defmodule TrinityCoordinator.Sakana.PythonImporterTest do
 
     File.write!(manifest_path, Jason.encode!(python_manifest))
 
-    spec = %ExportSpec{
-      name: :synthetic_python_import,
-      base_model_repo: "synthetic",
-      bumblebee_module: Bumblebee.Text.Gpt2,
-      architecture: :base,
-      hidden_size: 2,
-      num_agents: 1,
-      num_roles: 3,
-      selected_layer_indices: [],
-      scale_offset_count: 2,
-      source_vector_tensor: "synthetic",
-      router_head_tensor_key: Artifact.router_head_tensor_key(),
-      source_vector_path: "synthetic",
-      out_dir: out_dir,
-      xla_target: "host",
-      export_backend: "test"
-    }
+    spec = synthetic_spec(out_dir, 2)
 
     assert {:ok, manifest} =
              PythonImporter.import_bundle(
@@ -97,6 +81,105 @@ defmodule TrinityCoordinator.Sakana.PythonImporterTest do
 
     assert Nx.shape(adapted) == {2, 2}
     assert Nx.all_close(adapted, Nx.tensor([[1.0, 0.0], [0.0, 2.0]], type: :f32), atol: 1.0e-6)
+  end
+
+  test "defaults Python semantic V tensors to torch.svd V layout without live Qwen target" do
+    source_dir = unique_tmp_dir("python_source_torch_v")
+    out_dir = unique_tmp_dir("python_out_torch_v")
+    File.rm_rf!(out_dir)
+
+    on_exit(fn ->
+      File.rm_rf(source_dir)
+      File.rm_rf(out_dir)
+    end)
+
+    components_path = Path.join(source_dir, "trinity_svf_components.safetensors")
+    scales_path = Path.join(source_dir, "trinity_svf_scale_offsets.safetensors")
+    head_path = Path.join(source_dir, "trinity_router_head.safetensors")
+    manifest_path = Path.join(source_dir, "trinity_sakana_export_manifest.json")
+
+    u = Nx.tensor([[1.0, 0.0], [0.0, 1.0]], type: :f32)
+    s = Nx.tensor([1.0, 2.0], type: :f32)
+
+    # This is a non-symmetric orthogonal V in legacy torch.svd layout.  A wrong
+    # Vh/Nx interpretation flips both off-diagonal signs.
+    v = Nx.tensor([[0.0, -1.0], [1.0, 0.0]], type: :f32)
+    offsets = Nx.tensor([0.0, 0.0], type: :f32)
+    head = Nx.iota({4, 2}, type: :f32)
+
+    Safetensors.write!(components_path, %{
+      "svd.U.model.synthetic.weight" => u,
+      "svd.S.model.synthetic.weight" => s,
+      "svd.V.model.synthetic.weight" => v
+    })
+
+    Safetensors.write!(scales_path, %{"svf.scale_offsets.model.synthetic.weight" => offsets})
+    Safetensors.write!(head_path, %{"trinity.router_head.linear.weight" => head})
+
+    File.write!(
+      manifest_path,
+      Jason.encode!(%{
+        "format" => "trinity_sakana_safetensors_export",
+        "components_path" => Path.basename(components_path),
+        "scale_offsets_path" => Path.basename(scales_path),
+        "router_head_path" => Path.basename(head_path),
+        "source_vector_sha256" => "synthetic",
+        "selected_tensors" => [
+          %{
+            "source_name" => "model.synthetic.weight",
+            "elixir_name" => "synthetic.kernel",
+            "shape" => [2, 2],
+            "singular_values" => 2,
+            "offset_start" => 0,
+            "offset_end" => 2
+          }
+        ]
+      })
+    )
+
+    spec = synthetic_spec(out_dir, 2)
+
+    assert {:ok, manifest} =
+             PythonImporter.import_bundle(
+               source_dir: source_dir,
+               manifest: Path.basename(manifest_path),
+               out_dir: out_dir,
+               force: true,
+               load_qwen: false,
+               spec: spec
+             )
+
+    [entry] = manifest["selected_tensors"]
+    assert entry["python_v_layout"] == "torch_v"
+
+    tensors = Artifact.load_adapted_tensors!(out_dir, manifest: manifest)
+    adapted = Map.fetch!(tensors, "synthetic.kernel")
+
+    expected = Nx.tensor([[0.0, 1.0], [-2.0, 0.0]], type: :f32)
+    wrong_vh = Nx.tensor([[0.0, -1.0], [2.0, 0.0]], type: :f32)
+
+    assert Nx.all_close(adapted, expected, atol: 1.0e-6)
+    refute Nx.all_close(adapted, wrong_vh, atol: 1.0e-6)
+  end
+
+  defp synthetic_spec(out_dir, scale_count) do
+    %ExportSpec{
+      name: :synthetic_python_import,
+      base_model_repo: "synthetic",
+      bumblebee_module: Bumblebee.Text.Gpt2,
+      architecture: :base,
+      hidden_size: 2,
+      num_agents: 1,
+      num_roles: 3,
+      selected_layer_indices: [],
+      scale_offset_count: scale_count,
+      source_vector_tensor: "synthetic",
+      router_head_tensor_key: Artifact.router_head_tensor_key(),
+      source_vector_path: "synthetic",
+      out_dir: out_dir,
+      xla_target: "host",
+      export_backend: "test"
+    }
   end
 
   defp unique_tmp_dir(prefix) do

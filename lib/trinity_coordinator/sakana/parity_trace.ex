@@ -39,6 +39,7 @@ defmodule TrinityCoordinator.Sakana.ParityTrace do
         router_vector_path: @router_vector_path,
         reference_manifest_path: @reference_manifest_path,
         components_dir: nil,
+        python_report_path: nil,
         require_cuda: true
       )
 
@@ -50,6 +51,8 @@ defmodule TrinityCoordinator.Sakana.ParityTrace do
 
     reference = load_json!(opts[:reference_manifest_path])
     sample = Map.fetch!(reference, "sample_adapted_tensor")
+    python_report = maybe_load_json(opts[:python_report_path])
+    python_baseline = current_python_baseline(python_report)
 
     {:ok, {model_info, _tokenizer}} = SLMProfile.load_profile(:qwen_coordinator)
     selected = qwen_selected_tensors(model_info)
@@ -71,10 +74,20 @@ defmodule TrinityCoordinator.Sakana.ParityTrace do
     sample_entry_backend = Runtime.tensor_backend(sample_entry.tensor)
     source_backend = Runtime.tensor_backend(source_tensor)
 
-    native_variants = native_variants(source_host, offsets_host, sample, compute_backend)
+    native_variants =
+      native_variants(source_host, offsets_host, sample, compute_backend, python_baseline)
+
+    component_metadata = component_metadata(opts[:components_dir])
 
     semantic =
-      maybe_semantic_component_report(opts[:components_dir], source_host, sample, compute_backend)
+      maybe_semantic_component_report(
+        opts[:components_dir],
+        source_host,
+        sample,
+        compute_backend,
+        python_baseline,
+        component_metadata
+      )
 
     %{
       "schema" => "trinity_sakana_svd_parity_trace.v2",
@@ -83,7 +96,8 @@ defmodule TrinityCoordinator.Sakana.ParityTrace do
       "paths" => %{
         "router_vector" => opts[:router_vector_path],
         "reference_manifest" => opts[:reference_manifest_path],
-        "components_dir" => opts[:components_dir]
+        "components_dir" => opts[:components_dir],
+        "python_report" => opts[:python_report_path]
       },
       "reference" => %{
         "source_name" => sample["source_name"],
@@ -111,6 +125,8 @@ defmodule TrinityCoordinator.Sakana.ParityTrace do
       "scale_offsets" => tensor_summary(offsets_host, prefix_count: 16),
       "source_tensor" =>
         tensor_summary(source_host, prefix_count: 16, backend_label: source_backend),
+      "python_current_baseline" => python_baseline,
+      "python_component_metadata" => component_metadata,
       "native_elixir_svd_variants" => native_variants,
       "semantic_python_component_variants" => semantic
     }
@@ -124,7 +140,7 @@ defmodule TrinityCoordinator.Sakana.ParityTrace do
     :ok
   end
 
-  defp native_variants(source_host, offsets_host, sample, compute_backend) do
+  defp native_variants(source_host, offsets_host, sample, compute_backend, python_baseline) do
     [
       %{
         label: "native_nx_f32_svd_offsets_singular_final_bf16",
@@ -144,7 +160,9 @@ defmodule TrinityCoordinator.Sakana.ParityTrace do
       }
     ]
     |> Enum.map(fn config ->
-      native_variant(source_host, offsets_host, sample, config, compute_backend)
+      source_host
+      |> native_variant(offsets_host, sample, config, compute_backend)
+      |> add_python_match(python_baseline)
     end)
   end
 
@@ -218,10 +236,34 @@ defmodule TrinityCoordinator.Sakana.ParityTrace do
     }
   end
 
-  defp maybe_semantic_component_report(nil, _source_host, _sample, _compute_backend), do: nil
-  defp maybe_semantic_component_report("", _source_host, _sample, _compute_backend), do: nil
+  defp maybe_semantic_component_report(
+         nil,
+         _source_host,
+         _sample,
+         _compute_backend,
+         _python_baseline,
+         _metadata
+       ),
+       do: nil
 
-  defp maybe_semantic_component_report(components_dir, source_host, sample, compute_backend) do
+  defp maybe_semantic_component_report(
+         "",
+         _source_host,
+         _sample,
+         _compute_backend,
+         _python_baseline,
+         _metadata
+       ),
+       do: nil
+
+  defp maybe_semantic_component_report(
+         components_dir,
+         source_host,
+         sample,
+         compute_backend,
+         python_baseline,
+         metadata
+       ) do
     component_path = Path.join(components_dir, @component_file)
     scale_path = Path.join(components_dir, @scale_file)
 
@@ -234,9 +276,11 @@ defmodule TrinityCoordinator.Sakana.ParityTrace do
       v = fetch_tensor!(components, "svd.V.#{safe_key}") |> host_snapshot()
       offsets = fetch_tensor!(scales, "svf.scale_offsets.#{safe_key}") |> host_snapshot()
 
-      [:nx, :torch_v]
+      semantic_layouts(metadata)
       |> Enum.map(fn layout ->
-        safe_semantic_variant(layout, u, s, v, offsets, source_host, sample, compute_backend)
+        layout
+        |> safe_semantic_variant(u, s, v, offsets, source_host, sample, compute_backend)
+        |> add_python_match(python_baseline)
       end)
     else
       %{
@@ -340,6 +384,107 @@ defmodule TrinityCoordinator.Sakana.ParityTrace do
       "normalization" => scalar(Nx.divide(sum_s, sum_scaled_s))
     }
   end
+
+  defp add_python_match(variant, nil) when is_map(variant) do
+    variant
+    |> Map.put("python_current_baseline_label", nil)
+    |> Map.put("python_current_bf16_sha256", nil)
+    |> Map.put("matches_python_current", nil)
+  end
+
+  defp add_python_match(variant, python_baseline)
+       when is_map(variant) and is_map(python_baseline) do
+    python_digest = Map.get(python_baseline, "observed_bf16_sha256")
+
+    variant
+    |> Map.put("python_current_baseline_label", Map.get(python_baseline, "label"))
+    |> Map.put("python_current_bf16_sha256", python_digest)
+    |> Map.put(
+      "matches_python_current",
+      is_binary(python_digest) and Map.get(variant, "observed_bf16_sha256") == python_digest
+    )
+  end
+
+  defp current_python_baseline(nil), do: nil
+
+  defp current_python_baseline(report) when is_map(report) do
+    reference = Map.get(report, "reference", %{})
+    label = Map.get(reference, "current_python_baseline_label")
+    digest = Map.get(reference, "current_python_baseline_bf16_sha256")
+
+    cond do
+      is_binary(label) and is_binary(digest) ->
+        %{
+          "label" => label,
+          "observed_bf16_sha256" => digest,
+          "expected_hash_reproducible" => Map.get(reference, "expected_hash_reproducible"),
+          "source" => "python_report_reference"
+        }
+
+      true ->
+        report
+        |> Map.get("variants", [])
+        |> Enum.find(fn variant ->
+          is_map(variant) and is_binary(Map.get(variant, "observed_bf16_sha256"))
+        end)
+        |> case do
+          nil ->
+            nil
+
+          variant ->
+            %{
+              "label" => Map.get(variant, "label"),
+              "observed_bf16_sha256" => Map.get(variant, "observed_bf16_sha256"),
+              "expected_hash_reproducible" => Map.get(reference, "expected_hash_reproducible"),
+              "source" => "python_report_first_variant"
+            }
+        end
+    end
+  end
+
+  defp component_metadata(nil), do: nil
+  defp component_metadata(""), do: nil
+
+  defp component_metadata(components_dir) when is_binary(components_dir) do
+    path = Path.join(components_dir, "trinity_svf_debug_manifest.json")
+
+    if File.exists?(path) do
+      load_json!(path)
+    else
+      nil
+    end
+  end
+
+  defp semantic_layouts(metadata) do
+    preferred =
+      metadata
+      |> layout_from_metadata()
+      |> case do
+        nil -> :torch_v
+        layout -> layout
+      end
+
+    [preferred, :torch_v, :nx, :vh]
+    |> Enum.uniq()
+  end
+
+  defp layout_from_metadata(nil), do: nil
+
+  defp layout_from_metadata(metadata) when is_map(metadata) do
+    metadata
+    |> Map.get("component_v_layout")
+    |> normalize_v_layout()
+  end
+
+  defp normalize_v_layout(:torch_v), do: :torch_v
+  defp normalize_v_layout(:nx), do: :nx
+  defp normalize_v_layout(:vh), do: :vh
+  defp normalize_v_layout("torch_v"), do: :torch_v
+  defp normalize_v_layout("torch-v"), do: :torch_v
+  defp normalize_v_layout("torch"), do: :torch_v
+  defp normalize_v_layout("nx"), do: :nx
+  defp normalize_v_layout("vh"), do: :vh
+  defp normalize_v_layout(_), do: nil
 
   defp qwen_selected_tensors(model_info) do
     SVD.decomposable_tensor_entries(
@@ -474,6 +619,17 @@ defmodule TrinityCoordinator.Sakana.ParityTrace do
 
   defp device_copy(%Nx.Tensor{} = tensor, nil), do: tensor
   defp device_copy(%Nx.Tensor{} = tensor, backend), do: Nx.backend_transfer(tensor, backend)
+
+  defp maybe_load_json(nil), do: nil
+  defp maybe_load_json(""), do: nil
+
+  defp maybe_load_json(path) when is_binary(path) do
+    if File.exists?(path) do
+      load_json!(path)
+    else
+      raise ArgumentError, "JSON report does not exist: #{path}"
+    end
+  end
 
   defp load_json!(path) do
     path
