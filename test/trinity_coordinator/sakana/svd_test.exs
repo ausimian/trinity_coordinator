@@ -45,7 +45,7 @@ defmodule TrinityCoordinator.Sakana.SVDTest do
     reconstructed = SVD.reconstruct(%{u: u, s: s, v: torch_v}, zeros, v_layout: :torch_v)
     expected = Nx.tensor([[0.0, -2.0], [1.0, 0.0]], type: :f32)
 
-    assert Nx.all_close(reconstructed, expected, atol: 1.0e-6, rtol: 1.0e-6)
+    assert Nx.to_number(Nx.all_close(reconstructed, expected, atol: 1.0e-6, rtol: 1.0e-6)) == 1
   end
 
   @tag :integration
@@ -63,7 +63,11 @@ defmodule TrinityCoordinator.Sakana.SVDTest do
   test "adapt_tensors keeps scale offsets at SVD precision before final source-type cast" do
     tensor = Nx.tensor([[1.0, 0.0], [0.0, 2.0]], type: :bf16)
     entry = %{path: "bf16.kernel", segments: [:kernel], tensor: tensor}
-    offsets = Nx.tensor([0.33333, -0.33333], type: :f32)
+    # These values intentionally survive the final bf16 cast differently if
+    # offsets are prematurely quantized to bf16.  A prior fixture used offsets
+    # whose quantization error disappeared after the final cast, so it could not
+    # catch the precision regression reliably.
+    offsets = Nx.tensor([0.001, -0.67], type: :f32)
 
     adapted = SVD.adapt_tensors([entry], offsets, svd_compute_type: :f32)
     actual = adapted.tensors |> List.first() |> Map.fetch!(:tensor)

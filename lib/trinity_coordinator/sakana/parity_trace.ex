@@ -276,12 +276,20 @@ defmodule TrinityCoordinator.Sakana.ParityTrace do
       v = fetch_tensor!(components, "svd.V.#{safe_key}") |> host_snapshot()
       offsets = fetch_tensor!(scales, "svf.scale_offsets.#{safe_key}") |> host_snapshot()
 
-      semantic_layouts(metadata)
-      |> Enum.map(fn layout ->
+      for compute_target <- semantic_compute_targets(compute_backend),
+          layout <- semantic_layouts(metadata) do
         layout
-        |> safe_semantic_variant(u, s, v, offsets, source_host, sample, compute_backend)
+        |> safe_semantic_variant(
+          u,
+          s,
+          v,
+          offsets,
+          source_host,
+          sample,
+          compute_target
+        )
         |> add_python_match(python_baseline)
-      end)
+      end
     else
       %{
         "error" => "missing_semantic_component_files",
@@ -291,13 +299,14 @@ defmodule TrinityCoordinator.Sakana.ParityTrace do
     end
   end
 
-  defp safe_semantic_variant(layout, u, s, v, offsets, source_host, sample, compute_backend) do
-    semantic_variant(layout, u, s, v, offsets, source_host, sample, compute_backend)
+  defp safe_semantic_variant(layout, u, s, v, offsets, source_host, sample, compute_target) do
+    semantic_variant(layout, u, s, v, offsets, source_host, sample, compute_target)
   rescue
     e ->
       %{
-        "label" => "semantic_python_components_v_layout_#{layout}",
+        "label" => semantic_label(layout, compute_target),
         "svd_provider" => "python_components_safetensors",
+        "compute_backend" => compute_target.label,
         "v_layout" => Atom.to_string(layout),
         "error" => Exception.message(e),
         "matches_expected" => false
@@ -312,7 +321,7 @@ defmodule TrinityCoordinator.Sakana.ParityTrace do
          offsets_host,
          source_host,
          sample,
-         compute_backend
+         compute_target
        ) do
     typed_offsets_host = Nx.as_type(offsets_host, Nx.type(s_host)) |> host_snapshot()
 
@@ -321,12 +330,12 @@ defmodule TrinityCoordinator.Sakana.ParityTrace do
 
     zero_reconstruct_host =
       %{u: u_host, s: s_host, v: v_host}
-      |> reconstruct_on_backend(zero_offsets_host, compute_backend, v_layout: layout)
+      |> reconstruct_on_backend(zero_offsets_host, compute_target.backend, v_layout: layout)
       |> host_snapshot()
 
     sample_reconstruct_host =
       %{u: u_host, s: s_host, v: v_host}
-      |> reconstruct_on_backend(typed_offsets_host, compute_backend, v_layout: layout)
+      |> reconstruct_on_backend(typed_offsets_host, compute_target.backend, v_layout: layout)
       |> Nx.as_type(:bf16)
       |> host_snapshot()
 
@@ -341,8 +350,9 @@ defmodule TrinityCoordinator.Sakana.ParityTrace do
     observed = Artifact.tensor_sha256(final)
 
     %{
-      "label" => "semantic_python_components_v_layout_#{layout}",
+      "label" => semantic_label(layout, compute_target),
       "svd_provider" => "python_components_safetensors",
+      "compute_backend" => compute_target.label,
       "v_layout" => Atom.to_string(layout),
       "u" => tensor_summary(u_host, prefix_count: 4, include_alt_hashes: false),
       "s" => singular_summary(s_host, typed_offsets_host),
@@ -453,6 +463,31 @@ defmodule TrinityCoordinator.Sakana.ParityTrace do
     else
       nil
     end
+  end
+
+  defp semantic_compute_targets(nil) do
+    [%{label: "host_binary", backend: nil}]
+  end
+
+  defp semantic_compute_targets(compute_backend) do
+    [
+      %{label: "host_binary", backend: nil},
+      %{label: "device_#{backend_label_slug(compute_backend)}", backend: compute_backend}
+    ]
+  end
+
+  defp semantic_label(layout, compute_target) do
+    "semantic_python_components_#{compute_target.label}_v_layout_#{layout}"
+  end
+
+  defp backend_label_slug(nil), do: "binary"
+
+  defp backend_label_slug(backend) do
+    backend
+    |> inspect()
+    |> String.downcase()
+    |> String.replace(~r/[^a-z0-9]+/, "_")
+    |> String.trim("_")
   end
 
   defp semantic_layouts(metadata) do

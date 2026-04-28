@@ -80,7 +80,7 @@ defmodule TrinityCoordinator.Sakana.PythonImporterTest do
     adapted = Map.fetch!(tensors, "embedder.token_embedding.kernel")
 
     assert Nx.shape(adapted) == {2, 2}
-    assert Nx.all_close(adapted, Nx.tensor([[1.0, 0.0], [0.0, 2.0]], type: :f32), atol: 1.0e-6)
+    assert_all_close(adapted, Nx.tensor([[1.0, 0.0], [0.0, 2.0]], type: :f32), atol: 1.0e-6)
   end
 
   test "defaults Python semantic V tensors to torch.svd V layout without live Qwen target" do
@@ -158,8 +158,8 @@ defmodule TrinityCoordinator.Sakana.PythonImporterTest do
     expected = Nx.tensor([[0.0, 1.0], [-2.0, 0.0]], type: :f32)
     wrong_vh = Nx.tensor([[0.0, -1.0], [2.0, 0.0]], type: :f32)
 
-    assert Nx.all_close(adapted, expected, atol: 1.0e-6)
-    refute Nx.all_close(adapted, wrong_vh, atol: 1.0e-6)
+    assert_all_close(adapted, expected, atol: 1.0e-6)
+    refute_all_close(adapted, wrong_vh, atol: 1.0e-6)
   end
 
   defp synthetic_spec(out_dir, scale_count) do
@@ -180,6 +180,14 @@ defmodule TrinityCoordinator.Sakana.PythonImporterTest do
       xla_target: "host",
       export_backend: "test"
     }
+  end
+
+  defp assert_all_close(left, right, opts) do
+    assert Nx.to_number(Nx.all_close(left, right, opts)) == 1
+  end
+
+  defp refute_all_close(left, right, opts) do
+    assert Nx.to_number(Nx.all_close(left, right, opts)) == 0
   end
 
   defp unique_tmp_dir(prefix) do

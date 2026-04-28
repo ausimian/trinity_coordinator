@@ -419,7 +419,10 @@ defmodule TrinityCoordinator.Sakana.PythonImporter do
   defp source_reference_tensor(nil, _source_shape), do: nil
 
   defp source_reference_tensor(%{tensor: %Nx.Tensor{} = tensor}, source_shape) do
-    orient_for_target!(Nx.as_type(tensor, :f32), source_shape, "source_reference")
+    tensor
+    |> Nx.as_type(:f32)
+    |> Nx.backend_transfer(Nx.BinaryBackend)
+    |> orient_for_target!(source_shape, "source_reference")
   end
 
   defp choose_python_v_layout(_decomp, nil), do: %{layout: :torch_v, zero_error: nil}

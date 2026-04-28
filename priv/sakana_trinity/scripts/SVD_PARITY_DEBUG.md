@@ -57,9 +57,16 @@ This writes native Nx SVD variants and semantic Python-component reconstruction
 variants. The Elixir tracer snapshots intermediate tensors to `Nx.BinaryBackend`
 before reconstruction so EXLA donated buffers cannot crash the report.
 
+For semantic Python components, the tracer now emits both host/BinaryBackend and
+device/EXLA variants. Use the host/BinaryBackend semantic variant for strict
+functional parity with the current Python report; use the device variant to
+inspect runtime CUDA numerical drift. CUDA/EXLA may use different fp32 GEMM
+semantics than PyTorch CPU, so a device variant can have a larger zero-offset
+error and a different `bf16` hash even when the formula and V layout are right.
+
 Native variants are expected to differ when the SVD basis differs. Semantic
 Python-component variants isolate formula, V/Vh layout, orientation, final `bf16`
-cast, and raw-byte hashing.
+cast, raw-byte hashing, and compute backend.
 
 ## 3. Compare both reports
 
