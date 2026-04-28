@@ -97,6 +97,23 @@ This writes:
 
 The stage bundle is the baseline for Elixir's stage checks.
 
+For full selected-tensor component metadata, use:
+
+```bash
+python3 priv/sakana_trinity/scripts/debug_sakana_parity_sample.py \
+  --model-torch-dtype float32 \
+  --svd-weights path/to/svd_weights.pt \
+  --all-selected-tensors \
+  --out tmp/sakana_parity/python_sample_trace.json \
+  --write-components-dir tmp/sakana_parity/python_components
+```
+
+`--all-selected-tensors` requires `--svd-weights` by default. To intentionally
+recompute every selected SVD from the base model, add
+`--decompose-all-selected-if-missing`. That opt-in exists because the selected
+set includes embedding and LM-head matrices and can otherwise create an
+accidental long-running decomposition job.
+
 ## Elixir Semantic Reconstruction
 
 Run:
@@ -104,6 +121,9 @@ Run:
 ```bash
 XLA_TARGET=cuda12 mix trinity.sakana.parity_sample \
   --semantic-only \
+  --device-semantic-only \
+  --preferred-layout-only \
+  --source-from-python-stage \
   --components-dir tmp/sakana_parity/python_components \
   --python-report tmp/sakana_parity/python_sample_trace.json \
   --stage-dir tmp/sakana_parity/elixir_stages \
@@ -116,8 +136,27 @@ Important options:
 - `--components-dir`: read Python-exported `U/S/V` and offsets.
 - `--python-report`: read Python baseline metadata and Python stage file path.
 - `--stage-dir`: write Elixir stage tensors.
+- `--source-from-python-stage`: reuse Python's serialized `stage.source_f32`
+  instead of loading Qwen only to retrieve the sample source tensor.
+- `--preferred-layout-only`: run the manifest-preferred layout, currently
+  `torch_v`, instead of repeating known-wrong `nx` and `vh` diagnostics.
+- `--device-semantic-only`: run semantic reconstruction on EXLA CUDA and avoid a
+  large Nx BinaryBackend CPU matmul.
 
-The semantic host `torch_v` variant is the active functional-parity target.
+Use the slower layout-diagnostic command only when investigating orientation:
+
+```bash
+XLA_TARGET=cuda12 mix trinity.sakana.parity_sample \
+  --semantic-only \
+  --components-dir tmp/sakana_parity/python_components \
+  --python-report tmp/sakana_parity/python_sample_trace.json \
+  --stage-dir tmp/sakana_parity/elixir_stages \
+  --out tmp/sakana_parity/elixir_sample_trace.json
+```
+
+The semantic `torch_v` variant is the active functional-parity target. The
+recommended fast command emits the device `torch_v` variant and still writes the
+same required stage checks.
 
 ## Comparison
 

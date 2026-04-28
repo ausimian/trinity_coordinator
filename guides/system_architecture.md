@@ -75,6 +75,10 @@ for the Elixir service:
 
 - Builds Python-vs-Elixir parity reports.
 - Supports semantic-only mode.
+- Can reuse Python's `stage.source_f32` for sample semantic replay so Qwen does
+  not need to be loaded on every debug run.
+- Can restrict diagnostics to the preferred `torch_v` layout and/or the EXLA
+  device semantic target.
 - Reads Python-exported components.
 - Compares stage tensors against Python stage bundles.
 
@@ -127,8 +131,10 @@ Native Elixir SVD path:
 - can trigger long XLA/ptxas compile times;
 - is not expected to byte-match PyTorch adapted tensors under nonzero offsets.
 
-The active parity loop should use `--semantic-only` unless the question is
-specifically about native Nx SVD.
+The active parity loop should use `--semantic-only --source-from-python-stage
+--preferred-layout-only --device-semantic-only` unless the question is
+specifically about native Nx SVD, wrong-layout diagnostics, or host/backend
+comparison.
 
 ## Supplemental Runtime Contract
 

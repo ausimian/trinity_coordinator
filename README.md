@@ -59,6 +59,9 @@ Working now:
 - Python and Elixir parity scripts emit detailed JSON reports.
 - Python emits a stage tensor bundle from safetensors readback.
 - Elixir emits comparable semantic `torch_v` stage tensors with `--stage-dir`.
+- The fast semantic loop can reuse Python's `stage.source_f32`, skip wrong
+  layouts, and run the required reconstruction check through EXLA without
+  loading Qwen for every debug run.
 - `--strict-stage-tolerances` is the required functional correctness gate.
 
 Current parity result:
@@ -147,11 +150,19 @@ Generate Elixir semantic report and stage tensors:
 ```bash
 XLA_TARGET=cuda12 mix trinity.sakana.parity_sample \
   --semantic-only \
+  --device-semantic-only \
+  --preferred-layout-only \
+  --source-from-python-stage \
   --components-dir tmp/sakana_parity/python_components \
   --python-report tmp/sakana_parity/python_sample_trace.json \
   --stage-dir tmp/sakana_parity/elixir_stages \
   --out tmp/sakana_parity/elixir_sample_trace.json
 ```
+
+Those extra flags are the current recommended debug loop: skip native Nx SVD,
+skip the large host CPU matmul, skip known-wrong V-layout diagnostics, and reuse
+Python's stage source tensor instead of loading the full Qwen profile just to
+recover the sample source.
 
 Run the required functional parity gate:
 

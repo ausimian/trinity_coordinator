@@ -12,7 +12,7 @@ XLA_TARGET=cuda12 mix test
 Current expected result:
 
 ```text
-1 doctest, 148 tests, 0 failures, 25 excluded
+1 doctest, 150 tests, 0 failures, 25 excluded
 ```
 
 The excluded tests include slow Qwen/SVD gates and expensive artifact export
@@ -54,6 +54,9 @@ python3 priv/sakana_trinity/scripts/debug_sakana_parity_sample.py \
 ```bash
 XLA_TARGET=cuda12 mix trinity.sakana.parity_sample \
   --semantic-only \
+  --device-semantic-only \
+  --preferred-layout-only \
+  --source-from-python-stage \
   --components-dir tmp/sakana_parity/python_components \
   --python-report tmp/sakana_parity/python_sample_trace.json \
   --stage-dir tmp/sakana_parity/elixir_stages \
@@ -70,6 +73,14 @@ python3 priv/sakana_trinity/scripts/compare_sakana_parity_reports.py \
 ```
 
 This is the required parity gate.
+
+The additional Elixir flags are intentional for commit-loop parity work:
+
+- `--source-from-python-stage` avoids loading Qwen only to fetch the sample
+  source tensor.
+- `--preferred-layout-only` skips known-wrong V-layout diagnostics.
+- `--device-semantic-only` avoids a large host CPU matrix multiply and still
+  emits stage checks from the EXLA semantic variant.
 
 ## Byte-Match Gate
 
@@ -121,7 +132,8 @@ registers than available and some values were placed in CUDA local memory. It is
 often a compile/runtime performance concern, not a parity failure by itself.
 
 Use `--semantic-only` during semantic parity work to avoid the slow native Nx
-SVD compilation path.
+SVD compilation path. For the fastest sample parity loop, pair it with
+`--source-from-python-stage --preferred-layout-only --device-semantic-only`.
 
 ## Commit Checklist
 

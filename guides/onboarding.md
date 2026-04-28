@@ -36,6 +36,10 @@ Working today:
   safetensors, and stage tensors.
 - The Elixir parity task can consume those Python components and compare
   stage-by-stage against Python.
+- The recommended semantic debug loop now avoids repeated Qwen profile loading
+  by reading Python's `stage.source_f32`, checks only the preferred `torch_v`
+  layout, and runs the reconstruction through EXLA rather than a slow host CPU
+  matmul.
 - `--strict-stage-tolerances` is the required functional correctness gate.
 
 Not complete yet:
@@ -80,7 +84,7 @@ XLA_TARGET=cuda12 mix test
 Expected current result:
 
 ```text
-1 doctest, 148 tests, 0 failures, 25 excluded
+1 doctest, 150 tests, 0 failures, 25 excluded
 ```
 
 Run the static quality gates:
@@ -125,6 +129,9 @@ Then emit Elixir's semantic parity report without native Nx SVD diagnostics:
 ```bash
 XLA_TARGET=cuda12 mix trinity.sakana.parity_sample \
   --semantic-only \
+  --device-semantic-only \
+  --preferred-layout-only \
+  --source-from-python-stage \
   --components-dir tmp/sakana_parity/python_components \
   --python-report tmp/sakana_parity/python_sample_trace.json \
   --stage-dir tmp/sakana_parity/elixir_stages \

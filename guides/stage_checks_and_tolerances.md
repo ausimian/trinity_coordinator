@@ -24,8 +24,8 @@ The system must prove:
 | `stage.offsets_f32` | SVF offset slice | yes | exact |
 | `stage.scaled_s` | `S * (1 + offsets)` | yes | exact or tight |
 | `stage.normalization` | `sum(S) / sum(scaled_s)` | yes | tight |
-| `stage.u_scaled` | Python diagnostic `U * scaled_s` | no | diagnostic |
-| `stage.matmul_pre_norm` | Python diagnostic pre-normalization matmul | no | diagnostic |
+| `stage.u_scaled` | `U * scaled_s` before the dot | yes | exact or tight |
+| `stage.matmul_pre_norm` | Pre-normalization reconstruction | yes | numeric |
 | `stage.zero_source_f32` | Zero-offset source reconstruction | yes | numeric |
 | `stage.adapted_source_f32` | Adapted f32 source-orientation tensor | yes | numeric |
 | `stage.final_f32` | Final-orientation adapted f32 tensor | yes | numeric |
@@ -45,12 +45,14 @@ Scalar/vector stages:
 ```text
 stage.scaled_s: max_abs=1e-6, mean_abs=1e-8
 stage.normalization: max_abs=1e-6, mean_abs=1e-6
+stage.u_scaled: max_abs=1e-6, mean_abs=1e-8
 ```
 
 Large reconstruction stages:
 
 ```text
 stage.zero_source_f32: max_abs=1e-3, mean_abs=1e-5
+stage.matmul_pre_norm: max_abs=1e-3, mean_abs=1e-5
 stage.adapted_source_f32: max_abs=1e-3, mean_abs=1e-5
 stage.final_f32: max_abs=1e-3, mean_abs=1e-5
 ```
@@ -72,7 +74,10 @@ In the current environment:
 - `stage.source_f32`: byte-match.
 - `stage.offsets_f32`: byte-match.
 - `stage.scaled_s`: byte-match.
+- `stage.u_scaled`: byte-match.
 - `stage.normalization`: max difference about `5.96e-8`.
+- `stage.matmul_pre_norm`: max difference about `3.66e-4`, mean about
+  `6.42e-6`.
 - `stage.zero_source_f32`: max difference about `3.12e-4`, mean about
   `6.39e-6`.
 - `stage.adapted_source_f32`: max difference about `3.65e-4`, mean about
@@ -96,6 +101,11 @@ associative, so equivalent formulas can produce slightly different f32 outputs.
 
 Those small f32 differences can matter after `bf16` rounding because `bf16` has
 coarser spacing than `f32`.
+
+The Elixir stage bundle may derive `stage.matmul_pre_norm` from the already
+computed adapted reconstruction and normalization instead of performing a second
+large host-side dot. This keeps the debug loop practical while preserving the
+same conceptual checkpoint for tolerance comparison.
 
 ## How To Interpret Comparator Output
 

@@ -69,6 +69,22 @@ trinity_svf_debug_manifest.json
 For parity diagnostics, `debug_sakana_parity_sample.py` writes a sample-specific
 component bundle under `tmp/sakana_parity/python_components`.
 
+It can also write component metadata for the entire selected tensor set:
+
+```bash
+python3 priv/sakana_trinity/scripts/debug_sakana_parity_sample.py \
+  --model-torch-dtype float32 \
+  --svd-weights path/to/svd_weights.pt \
+  --all-selected-tensors \
+  --out tmp/sakana_parity/python_sample_trace.json \
+  --write-components-dir tmp/sakana_parity/python_components
+```
+
+Without `--svd-weights`, this all-selected debug mode fails fast unless
+`--decompose-all-selected-if-missing` is explicitly supplied. That protects the
+normal parity loop from accidentally decomposing the large embedding and LM-head
+matrices.
+
 For broader export, use:
 
 ```bash

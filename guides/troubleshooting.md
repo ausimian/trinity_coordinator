@@ -9,6 +9,9 @@ Use semantic-only mode:
 ```bash
 XLA_TARGET=cuda12 mix trinity.sakana.parity_sample \
   --semantic-only \
+  --device-semantic-only \
+  --preferred-layout-only \
+  --source-from-python-stage \
   --components-dir tmp/sakana_parity/python_components \
   --python-report tmp/sakana_parity/python_sample_trace.json \
   --stage-dir tmp/sakana_parity/elixir_stages \
@@ -18,6 +21,15 @@ XLA_TARGET=cuda12 mix trinity.sakana.parity_sample \
 Without `--semantic-only`, the task runs native Nx SVD diagnostics. Native SVD
 can trigger expensive XLA compilation and ptxas register-spill warnings. That is
 not needed for semantic Python-component debugging.
+
+The additional fast-loop flags address separate sources of wasted time:
+
+- `--source-from-python-stage` avoids loading Qwen just to recover the sample
+  source tensor.
+- `--preferred-layout-only` skips `nx`/`vh` layout diagnostics once `torch_v`
+  has been established.
+- `--device-semantic-only` avoids a large host CPU matrix multiply and uses EXLA
+  for the one required reconstruction path.
 
 ## Python Does Not Match The Historical Hash
 
@@ -54,6 +66,8 @@ Interpretation:
 - the Elixir semantic layout should be `v_layout: :torch_v`.
 
 Do not try to make the wrong layout match.
+
+Once this is established, use `--preferred-layout-only` in routine parity runs.
 
 ## Source Or Final Shape Mismatch
 

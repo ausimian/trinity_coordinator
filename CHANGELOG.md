@@ -13,6 +13,15 @@
   for later removal or archival after the parity/service path is stable.
 - Kept final Python byte matching as an aspirational target while documenting
   `--strict-stage-tolerances` as the required functional correctness gate.
+- Added a faster Sakana sample parity loop with Python stage-source reuse,
+  preferred-layout-only replay, and device-only semantic reconstruction.
+- Guarded all-selected Python component debug export so it requires
+  `svd_weights.pt` unless full recomputation is explicitly requested.
+- Added Elixir stage checks for `stage.u_scaled` and
+  `stage.matmul_pre_norm`, preserving the functional tolerance gate while
+  continuing to report final `bf16` byte mismatches separately.
+- Normalized runtime role metadata to imported checkpoint order:
+  raw Python `solver` is public `Worker`, then `Thinker`, then `Verifier`.
 
 ## 2026-04-21
 

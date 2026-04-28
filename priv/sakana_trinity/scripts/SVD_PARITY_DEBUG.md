@@ -61,6 +61,9 @@ Only use strict stored-reference assertions after the Python report itself says
 ```bash
 XLA_TARGET=cuda12 mix trinity.sakana.parity_sample \
   --semantic-only \
+  --device-semantic-only \
+  --preferred-layout-only \
+  --source-from-python-stage \
   --components-dir tmp/sakana_parity/python_components \
   --python-report tmp/sakana_parity/python_sample_trace.json \
   --stage-dir tmp/sakana_parity/elixir_stages \
@@ -68,8 +71,18 @@ XLA_TARGET=cuda12 mix trinity.sakana.parity_sample \
 ```
 
 `--semantic-only` skips native `Nx.LinAlg.svd/2` diagnostics and avoids the
-long CUDA SVD compilation path while debugging Python-component parity. Omit it
-only when you specifically need native Nx SVD diagnostics.
+long CUDA SVD compilation path while debugging Python-component parity. The
+extra flags are the fast sample loop:
+
+- `--source-from-python-stage` reads Python's serialized `stage.source_f32`
+  instead of loading Qwen only to recover the sample source tensor.
+- `--preferred-layout-only` skips the already-known-wrong `nx`/`vh` layout
+  diagnostics.
+- `--device-semantic-only` runs the one required reconstruction through EXLA and
+  avoids a large host CPU matrix multiply.
+
+Omit these extra flags only when you specifically need native Nx SVD,
+wrong-layout diagnostics, host/backend comparisons, or full Qwen source loading.
 
 The Elixir tracer snapshots intermediate tensors to `Nx.BinaryBackend` before
 reconstruction so EXLA donated buffers cannot crash the report. Semantic
@@ -77,21 +90,15 @@ variants include both the final `bf16` tensor summary and a
 `final_f32_before_bf16` summary so formula/accumulation differences can be
 separated from final byte-hash rounding.
 
-With `--stage-dir`, the Elixir tracer writes:
+With `--stage-dir`, the Elixir tracer writes a file named for the selected
+compute target, for example:
 
-- `tmp/sakana_parity/elixir_stages/trinity_svf_elixir_stage_host_binary_torch_v.safetensors`
+- `tmp/sakana_parity/elixir_stages/trinity_svf_elixir_stage_device_exla_backend_client_cuda_torch_v.safetensors`
 
 It also embeds stage checks in the Elixir JSON report when the Python report
-points at a Python stage bundle. The host `torch_v` semantic path is the
+points at a Python stage bundle. The `torch_v` semantic path is the
 functional-parity target because it consumes the exact Python `U/S/V` components
 and avoids native SVD basis differences.
-
-For semantic Python components, the tracer now emits both host/BinaryBackend and
-device/EXLA variants. Use the host/BinaryBackend semantic variant for strict
-functional parity with the current Python report; use the device variant to
-inspect runtime CUDA numerical drift. CUDA/EXLA may use different fp32 GEMM
-semantics than PyTorch CPU, so a device variant can have a larger zero-offset
-error and a different `bf16` hash even when the formula and V layout are right.
 
 Native variants are expected to differ when the SVD basis differs. Semantic
 Python-component variants isolate formula, V/Vh layout, orientation, framework
