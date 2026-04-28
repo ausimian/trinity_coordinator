@@ -1,112 +1,103 @@
 # SVD Generation Runbook
 
-This runbook covers the two long-running ways to produce all-selected Python
-SVD parity inputs.
+Use this runbook when validating the full selected-tensor Sakana parity gate.
+The Python commands are run through `uv`; do not use `pip` for this workflow.
 
-## Purpose
+## What To Run First
 
-The all-selected parity gate needs Python `U/S/V` components for every selected
-Qwen tensor. There are two useful sources:
+Run the original supplemental decomposer first. This is the correct first path
+because it creates the historical-style `svd_weights.pt` file from the
+unmodified source script:
 
-1. the original supplemental decomposer under
-   `docs/priv/trinity_code_submission/decompose_model.py`;
-2. the parity harness's explicit
-   `--decompose-all-selected-if-missing` path.
-
-Both paths should write to `tmp/` and must not modify
-`docs/priv/trinity_code_submission`.
-
-## Runtime Warning
-
-Both jobs are expensive. They load `Qwen/Qwen3-0.6B` and run large CPU SVDs. If
-you run them at the same time, limit BLAS threads so they do not fight for every
-CPU core:
-
-```bash
-export THREADS=4
+```text
+docs/priv/trinity_code_submission/decompose_model.py
 ```
 
-Increase or decrease this based on available RAM and CPU cores.
-
-## Terminal 1: Original Supplemental `svd_weights.pt`
-
-The supplemental script imports `fire`. If it is missing, install it in the
-Python environment used for the run:
+The script below treats that directory as read-only input and writes everything
+under `tmp/`.
 
 ```bash
-python3 -m pip install --user fire
-```
-
-Run:
-
-```bash
-THREADS=4 \
-OUT_ROOT=tmp/sakana_parity/original_submission_svd \
+cd ~/p/g/n/trinity_coordinator
 priv/sakana_trinity/scripts/run_original_submission_svd_weights.sh
 ```
 
-This writes:
+That one command does all of this:
+
+1. uses `uv run` with pinned Python deps;
+2. runs the original supplemental `decompose_model.py`;
+3. writes `tmp/sakana_parity/original_submission_svd/Qwen_Qwen3-0.6B/svd_weights.pt`;
+4. runs Python all-selected parity from that `.pt`;
+5. runs Elixir all-selected replay;
+6. runs `compare_sakana_parity_reports.py --strict-stage-tolerances`.
+
+Do not start the second job until this one finishes or fails.
+
+## What To Send Back After Run 1
+
+Send these lines or files:
 
 ```text
-tmp/sakana_parity/original_submission_svd/Qwen_Qwen3-0.6B/svd_weights.pt
 tmp/sakana_parity/original_submission_svd/decompose_model.log
-tmp/sakana_parity/original_submission_svd/python_sample_trace.json
-tmp/sakana_parity/original_submission_svd/python_components/
-tmp/sakana_parity/original_submission_svd/elixir_sample_trace.json
-tmp/sakana_parity/original_submission_svd/elixir_stages/
+tmp/sakana_parity/original_submission_svd/python_all_selected.log
+tmp/sakana_parity/original_submission_svd/elixir_all_selected.log
 tmp/sakana_parity/original_submission_svd/compare.log
 ```
 
-Set `RUN_PARITY_AFTER=0` to only generate `svd_weights.pt` and skip the parity
-replay:
+If the command succeeds, the most important file is:
 
-```bash
-RUN_PARITY_AFTER=0 \
-THREADS=4 \
-OUT_ROOT=tmp/sakana_parity/original_submission_svd \
-priv/sakana_trinity/scripts/run_original_submission_svd_weights.sh
+```text
+tmp/sakana_parity/original_submission_svd/compare.log
 ```
 
-## Terminal 2: Explicit All-Selected Recompute
+Also send:
 
-Run:
+```text
+tmp/sakana_parity/original_submission_svd/Qwen_Qwen3-0.6B/svd_weights.pt
+```
+
+as a path only. Do not paste or upload the `.pt` unless asked.
+
+## Only If Needed: Independent Expensive Recompute
+
+Run this second command only if the first path fails or if we need an
+independent comparison that does not use `svd_weights.pt`.
 
 ```bash
-THREADS=4 \
-OUT_ROOT=tmp/sakana_parity/expensive_all_selected_decompose \
+cd ~/p/g/n/trinity_coordinator
 priv/sakana_trinity/scripts/run_expensive_all_selected_decompose.sh
 ```
 
-This writes:
+That one command:
+
+1. uses `uv run` with pinned Python deps;
+2. recomputes all selected SVD components directly in
+   `debug_sakana_parity_sample.py`;
+3. runs Elixir all-selected replay;
+4. runs `compare_sakana_parity_reports.py --strict-stage-tolerances`.
+
+Send back:
 
 ```text
 tmp/sakana_parity/expensive_all_selected_decompose/python_decompose_all_selected.log
-tmp/sakana_parity/expensive_all_selected_decompose/python_sample_trace.json
-tmp/sakana_parity/expensive_all_selected_decompose/python_components/
-tmp/sakana_parity/expensive_all_selected_decompose/elixir_sample_trace.json
-tmp/sakana_parity/expensive_all_selected_decompose/elixir_stages/
+tmp/sakana_parity/expensive_all_selected_decompose/elixir_all_selected.log
 tmp/sakana_parity/expensive_all_selected_decompose/compare.log
 ```
 
-## What To Report Back
+## Expected Cost
 
-For each terminal, report:
+These are long CPU SVD jobs over Qwen matrices. The scripts cap BLAS threads to
+4 internally. Leave that alone for the first run; we can tune it later if the
+machine is idle or overloaded.
 
-- whether the command exited zero;
-- the final `current_python_baseline` line;
-- the `reference_hash_reproducible` line;
-- the final comparator summary from `compare.log`;
-- any failed required stage lines.
+## Success Criteria
 
-If a run fails, provide the relevant log:
+The run is useful if it reaches the comparator.
+
+The comparator success line is:
 
 ```text
-decompose_model.log
-python_all_selected.log
-python_decompose_all_selected.log
-elixir_all_selected.log
-compare.log
+strict stage tolerances passed by exiting with status 0
 ```
 
-Do not paste stage safetensors. They can be very large; provide paths and log
-summaries first.
+If it exits non-zero, send the final 80 lines of `compare.log` and the first
+failed required stage line.

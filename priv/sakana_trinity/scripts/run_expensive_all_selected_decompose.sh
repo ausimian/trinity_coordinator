@@ -7,6 +7,15 @@ set -euo pipefail
 OUT_ROOT="${OUT_ROOT:-tmp/sakana_parity/expensive_all_selected_decompose}"
 THREADS="${THREADS:-4}"
 XLA_TARGET="${XLA_TARGET:-cuda12}"
+UV_PY=(
+  uv run
+  --with torch==2.7.1
+  --with transformers==4.55.2
+  --with accelerate==1.6.0
+  --with numpy
+  --with safetensors
+  python
+)
 
 export OMP_NUM_THREADS="$THREADS"
 export MKL_NUM_THREADS="$THREADS"
@@ -17,9 +26,10 @@ mkdir -p "$OUT_ROOT"
 
 echo "[expensive-all-selected] out_root=$OUT_ROOT"
 echo "[expensive-all-selected] threads=$THREADS"
+echo "[expensive-all-selected] python runner=uv"
 echo "[expensive-all-selected] this intentionally recomputes selected SVDs from Qwen"
 
-python3 priv/sakana_trinity/scripts/debug_sakana_parity_sample.py \
+"${UV_PY[@]}" priv/sakana_trinity/scripts/debug_sakana_parity_sample.py \
   --model-torch-dtype float32 \
   --all-selected-tensors \
   --decompose-all-selected-if-missing \
@@ -39,7 +49,7 @@ XLA_TARGET="$XLA_TARGET" mix trinity.sakana.parity_sample \
   --out "$OUT_ROOT/elixir_sample_trace.json" \
   2>&1 | tee "$OUT_ROOT/elixir_all_selected.log"
 
-python3 priv/sakana_trinity/scripts/compare_sakana_parity_reports.py \
+"${UV_PY[@]}" priv/sakana_trinity/scripts/compare_sakana_parity_reports.py \
   --strict-stage-tolerances \
   "$OUT_ROOT/python_sample_trace.json" \
   "$OUT_ROOT/elixir_sample_trace.json" \
