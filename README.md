@@ -202,7 +202,7 @@ python3 priv/sakana_trinity/scripts/debug_sakana_parity_sample.py \
   --write-components-dir tmp/sakana_parity/python_components
 ```
 
-Then replay every selected tensor from those Python components:
+Then replay a bounded layer-26 slice from those Python components:
 
 ```bash
 XLA_TARGET=cuda12 mix trinity.sakana.parity_sample \
@@ -211,6 +211,7 @@ XLA_TARGET=cuda12 mix trinity.sakana.parity_sample \
   --preferred-layout-only \
   --source-from-python-stage \
   --all-selected-tensors \
+  --selected-source-regex 'model\.layers\.26\.' \
   --components-dir tmp/sakana_parity/python_components \
   --python-report tmp/sakana_parity/python_sample_trace.json \
   --stage-dir tmp/sakana_parity/elixir_stages \
@@ -218,8 +219,10 @@ XLA_TARGET=cuda12 mix trinity.sakana.parity_sample \
 ```
 
 This path is deliberately explicit because it can materialize very large stage
-tensors for the embedding and LM-head matrices. Without `--svd-weights`, the
-Python script still requires `--decompose-all-selected-if-missing`.
+tensors for the embedding and LM-head matrices. Keep embedding/LM-head replay
+out of the monolithic EXLA command until the chunked large-tensor gate is in
+place. Without `--svd-weights`, the Python script still requires
+`--decompose-all-selected-if-missing`.
 
 ## Runtime Shape
 

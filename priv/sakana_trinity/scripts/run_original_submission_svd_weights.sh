@@ -69,12 +69,16 @@ PY
   --write-components-dir "$OUT_ROOT/python_components" \
   2>&1 | tee "$OUT_ROOT/python_all_selected.log"
 
+echo "[original-svd] elixir replay filter=model.layers.26.*"
+echo "[original-svd] full embedding/lm_head replay is intentionally skipped here; use a chunked gate for those tensors"
+
 XLA_TARGET="$XLA_TARGET" mix trinity.sakana.parity_sample \
   --semantic-only \
   --device-semantic-only \
   --preferred-layout-only \
   --source-from-python-stage \
   --all-selected-tensors \
+  --selected-source-regex 'model\.layers\.26\.' \
   --components-dir "$OUT_ROOT/python_components" \
   --python-report "$OUT_ROOT/python_sample_trace.json" \
   --stage-dir "$OUT_ROOT/elixir_stages" \

@@ -27,10 +27,17 @@ That one command does all of this:
 2. runs the original supplemental `decompose_model.py`;
 3. writes `tmp/sakana_parity/original_submission_svd/Qwen_Qwen3-0.6B/svd_weights.pt`;
 4. runs Python all-selected parity from that `.pt`;
-5. runs Elixir all-selected replay;
+5. runs Elixir all-selected replay for the bounded `model.layers.26.*` slice;
 6. runs `compare_sakana_parity_reports.py --strict-stage-tolerances`.
 
 Do not start the second job until this one finishes or fails.
+
+The Python all-selected bundle still contains the embedding and LM-head
+diagnostics. The script intentionally does not replay those huge tensors through
+the monolithic Elixir command because they can stall or exhaust GPU memory while
+materializing full stage tensors. Treat the layer-26 replay as the current
+service-critical gate and add a chunked large-tensor gate before enforcing
+embedding/LM-head replay.
 
 ## What To Send Back After Run 1
 
@@ -72,7 +79,7 @@ That one command:
 1. uses `uv run` with pinned Python deps;
 2. recomputes all selected SVD components directly in
    `debug_sakana_parity_sample.py`;
-3. runs Elixir all-selected replay;
+3. runs Elixir all-selected replay for the bounded `model.layers.26.*` slice;
 4. runs `compare_sakana_parity_reports.py --strict-stage-tolerances`.
 
 Send back:

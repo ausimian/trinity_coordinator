@@ -76,10 +76,14 @@ This is the required parity gate.
 
 When validating the full selected tensor set, generate Python with
 `--all-selected-tensors --svd-weights path/to/svd_weights.pt`, then add
-`--all-selected-tensors` to the Elixir command above. That mode reads
+`--all-selected-tensors` to the Elixir command above. Add
+`--selected-source-regex 'model\.layers\.26\.'` for the current bounded replay
+gate. That mode reads
 `trinity_svf_all_selected_stage_debug.safetensors` and fails strict stage
-tolerances if any required stage fails for any selected tensor. It can emit very
-large diagnostic tensors, so it is not the default commit-loop command.
+tolerances if any required stage fails for any replayed selected tensor.
+Embedding and LM-head tensors require a chunked large-tensor gate before they
+should be enforced through Elixir; the monolithic stage replay can otherwise
+stall or exhaust GPU memory.
 
 The additional Elixir flags are intentional for commit-loop parity work:
 

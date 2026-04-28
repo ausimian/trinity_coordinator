@@ -39,11 +39,14 @@ defmodule Mix.Tasks.Trinity.Sakana.ParitySampleTest do
       ParitySample.parse_args!([
         "--semantic-only",
         "--all-selected-tensors",
+        "--selected-source-regex",
+        "model\\.layers\\.26\\.",
         "--source-from-python-stage"
       ])
 
     refute opts[:native?]
     assert opts[:all_selected_tensors]
+    assert opts[:selected_source_regex] == "model\\.layers\\.26\\."
     assert opts[:source_from_python_stage]
   end
 
@@ -54,7 +57,7 @@ defmodule Mix.Tasks.Trinity.Sakana.ParitySampleTest do
   end
 
   @tag :tmp_dir
-  test "all-selected semantic replay compares each selected tensor against namespaced Python stages",
+  test "all-selected semantic replay can filter selected tensors before namespaced stage checks",
        %{tmp_dir: tmp_dir} do
     components_dir = Path.join(tmp_dir, "components")
     stage_dir = Path.join(tmp_dir, "elixir_stages")
@@ -169,15 +172,13 @@ defmodule Mix.Tasks.Trinity.Sakana.ParitySampleTest do
         semantic_layout_diagnostics?: false,
         source_from_python_stage?: true,
         all_selected_tensors?: true,
+        selected_source_regex: "synthetic_b",
         require_cuda: false
       )
 
     variants = report["semantic_python_component_variants"]
 
-    assert Enum.map(variants, & &1["source_name"]) == [
-             "model.synthetic_a.weight",
-             "model.synthetic_b.weight"
-           ]
+    assert Enum.map(variants, & &1["source_name"]) == ["model.synthetic_b.weight"]
 
     assert Enum.all?(variants, &get_in(&1, ["stage_debug", "functional_parity_passed"]))
     assert Enum.all?(variants, &(length(get_in(&1, ["stage_debug", "checks"])) == 10))

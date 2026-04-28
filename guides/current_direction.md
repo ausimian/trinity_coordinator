@@ -67,9 +67,12 @@ large cleanup diff on top.
 
 1. Extend sample parity to all selected tensors:
    - Python emits source-oriented stage/debug data for every selected tensor.
-   - Elixir replays every selected tensor from Python components with
-     `--all-selected-tensors`.
-   - The comparator fails if any required stage for any selected tensor fails.
+   - Elixir currently replays the bounded `model.layers.26.*` slice from Python
+     components with `--all-selected-tensors --selected-source-regex`.
+   - The comparator fails if any required stage for any replayed selected tensor
+     fails.
+   - Embedding and LM-head replay remain a chunked large-tensor follow-up before
+     this gate can honestly cover every selected tensor end to end in Elixir.
    - Final `bf16` byte equality remains reported as an aspirational diagnostic,
      not the required gate.
 2. Import the full Python semantic export bundle into canonical Elixir
