@@ -81,6 +81,10 @@ large cleanup diff on top.
    - use `mix trinity.sakana.import_python` for canonical runtime artifacts;
    - validate manifest, checkpoint hashes, tensor shapes/types, and router head
      shape `{10, 1024}`.
+   - Status: complete for
+     `tmp/sakana_parity/adapted_artifacts_from_python`; the importer writes
+     checkpoint-directory artifacts with 9 target-verified tensors and router
+     head shape `{10, 1024}`.
 3. Load `:qwen_sakana_adapted` as the service coordinator profile:
    - apply adapted tensors;
    - load router head;

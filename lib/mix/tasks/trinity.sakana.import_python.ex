@@ -93,6 +93,8 @@ defmodule Mix.Tasks.Trinity.Sakana.ImportPython do
 
   defp normalize_for_json(value) when is_list(value), do: Enum.map(value, &normalize_for_json/1)
   defp normalize_for_json(value) when is_tuple(value), do: Tuple.to_list(value)
+  defp normalize_for_json(value) when is_boolean(value), do: value
+  defp normalize_for_json(nil), do: nil
   defp normalize_for_json(value) when is_atom(value), do: Atom.to_string(value)
   defp normalize_for_json(value), do: value
 end

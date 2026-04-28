@@ -135,6 +135,71 @@ defmodule TrinityCoordinator.Sakana.ArtifactTest do
     assert Artifact.trace_metadata(%{}) == %{}
   end
 
+  test "detects checkpoint sha256 mismatch while loading adapted tensors" do
+    out_dir = unique_tmp_dir()
+
+    on_exit(fn ->
+      File.rm_rf(out_dir)
+    end)
+
+    checkpoint_rel = Path.join([Artifact.checkpoint_directory_name(), "0001_test.safetensors"])
+    checkpoint_path = Path.join(out_dir, checkpoint_rel)
+    File.mkdir_p!(Path.dirname(checkpoint_path))
+
+    Safetensors.write!(checkpoint_path, %{
+      "synthetic.kernel" => Nx.broadcast(1.0, {2, 2})
+    })
+
+    manifest = %{
+      "artifact_version" => Artifact.manifest_version(),
+      "status" => "complete",
+      "export_complete" => true,
+      "partial_debug_only" => false,
+      "artifact_layout" => Artifact.artifact_layout_checkpoint_directory(),
+      "selected_tensors" => [
+        %{
+          "path" => "synthetic.kernel",
+          "artifact_key" => "synthetic.kernel",
+          "shape" => [2, 2],
+          "status" => "complete",
+          "checkpoint_path" => checkpoint_rel,
+          "checkpoint_sha256" => String.duplicate("0", 64)
+        }
+      ]
+    }
+
+    assert_raise ArgumentError, ~r/synthetic\.kernel sha256 mismatch/, fn ->
+      Artifact.load_adapted_tensors!(out_dir, manifest: manifest)
+    end
+  end
+
+  test "detects router head sha256 mismatch while loading router head" do
+    out_dir = unique_tmp_dir()
+
+    on_exit(fn ->
+      File.rm_rf(out_dir)
+    end)
+
+    Safetensors.write!(Path.join(out_dir, Artifact.router_head_file()), %{
+      Artifact.router_head_tensor_key() => Nx.broadcast(1.0, {4, 2})
+    })
+
+    manifest = %{
+      "artifact_version" => Artifact.manifest_version(),
+      "status" => "complete",
+      "export_complete" => true,
+      "partial_debug_only" => false,
+      "router_head_artifact" => Artifact.router_head_file(),
+      "router_head_tensor_key" => Artifact.router_head_tensor_key(),
+      "router_head_shape" => [4, 2],
+      "router_head_sha256" => String.duplicate("0", 64)
+    }
+
+    assert_raise ArgumentError, ~r/router_head sha256 mismatch/, fn ->
+      Artifact.load_router_head!(out_dir, manifest: manifest)
+    end
+  end
+
   test "identity comparison ignores ephemeral tensor statuses" do
     expected = %{
       "artifact_version" => 1,

@@ -190,6 +190,7 @@ defmodule TrinityCoordinator.Sakana.Artifact do
 
   defp load_adapted_tensors_single_file(out_dir, manifest, entries) do
     path = Path.join(out_dir, field(manifest, "adapted_tensors_artifact", @adapted_tensors_file))
+    validate_file_sha256!(path, field(manifest, "adapted_tensors_sha256"), :adapted_tensors)
     _tensors = Safetensors.read!(path)
 
     Enum.reduce(entries, %{}, fn entry, acc ->
@@ -212,6 +213,7 @@ defmodule TrinityCoordinator.Sakana.Artifact do
       path_key = field(entry, "path")
       artifact_key = field(entry, "artifact_key", path_key)
       checkpoint_path = Path.join(out_dir, field(entry, "checkpoint_path", ""))
+      validate_file_sha256!(checkpoint_path, field(entry, "checkpoint_sha256"), path_key)
 
       checkpoint_tensor = load_safetensor_tensor!(checkpoint_path, artifact_key)
       ensure_tensor_shape_and_type!(checkpoint_tensor, path_key, entry)
@@ -229,6 +231,7 @@ defmodule TrinityCoordinator.Sakana.Artifact do
     ensure_manifest_complete!(manifest, opts[:allow_incomplete])
 
     path = Path.join(out_dir, field(manifest, "router_head_artifact", @router_head_file))
+    validate_file_sha256!(path, field(manifest, "router_head_sha256"), :router_head)
     key = field(manifest, "router_head_tensor_key", @router_head_tensor_key)
     tensor = load_safetensor_tensor!(path, key)
 
@@ -580,6 +583,18 @@ defmodule TrinityCoordinator.Sakana.Artifact do
     unless is_tuple(expected_shape) and Nx.shape(tensor) == expected_shape do
       raise ArgumentError,
             "#{label} shape mismatch: expected #{inspect(expected_shape)} got #{inspect(Nx.shape(tensor))}"
+    end
+  end
+
+  defp validate_file_sha256!(_path, nil, _label), do: :ok
+  defp validate_file_sha256!(_path, "", _label), do: :ok
+
+  defp validate_file_sha256!(path, expected, label) when is_binary(expected) do
+    actual = file_sha256!(path)
+
+    if actual != expected do
+      raise ArgumentError,
+            "#{label} sha256 mismatch: expected #{expected}, got #{actual}"
     end
   end
 

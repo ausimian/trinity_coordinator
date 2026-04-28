@@ -63,6 +63,9 @@ Working now:
   layouts, and run the required reconstruction check through EXLA without
   loading Qwen for every debug run.
 - `--strict-stage-tolerances` is the required functional correctness gate.
+- Full Python semantic export imports into canonical checkpoint-directory
+  Elixir artifacts with 9 target-verified tensors, 9,216 singular offsets, and
+  router head shape `{10, 1024}`.
 
 Current parity result:
 
@@ -77,6 +80,10 @@ Current parity result:
 - Source tensors, offsets, scaled singular values, and `u_scaled` byte-match;
   required f32 reconstruction stages pass explicit tolerances.
 - Final `bf16` byte matching remains aspirational and is reported separately.
+- Canonical import validation passes with `status=complete`,
+  `artifact_layout=checkpoint_directory`, `selected_tensor_count=9`,
+  `selected_singular_value_count=9216`, `loaded_tensor_count=9`, and
+  `target_verified_count=9`.
 
 Recent non-matching Elixir final hashes have included
 `bf089ea0607c93ae69f92bf7b9fcf71dc2a2b53d231cfe307b8cd6f4ef6a85ae` and

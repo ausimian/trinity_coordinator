@@ -60,21 +60,21 @@ defmodule TrinityCoordinator.Sakana.PythonImporter do
          {:ok, python_manifest} <- load_json(opts.python_manifest_path),
          {:ok, reference_manifest} <- maybe_load_json(opts.reference_manifest_path),
          {:ok, paths} <- resolve_bundle_paths(opts.source_dir, python_manifest),
-         {:ok, components} <- read_safetensors(paths.components),
-         {:ok, scales} <- read_safetensors(paths.scales),
+         {:ok, components} <- read_safetensors(paths.components, lazy: true),
+         {:ok, scales} <- read_safetensors(paths.scales, lazy: true),
          {:ok, head_file} <- read_safetensors(paths.head),
          {:ok, selected_entries} <- selected_entries(python_manifest, reference_manifest),
          {:ok, targets} <- load_targets(opts),
          {:ok, head_weights} <- normalize_router_head(head_file, python_manifest, opts.spec),
-         {:ok, tensor_results} <-
-           reconstruct_all(selected_entries, components, scales, targets, opts) do
+         {:ok, selected_tensors} <-
+           reconstruct_and_write_checkpoints(selected_entries, components, scales, targets, opts) do
       write_canonical_bundle(
         opts,
         python_manifest,
         reference_manifest,
         paths,
         head_weights,
-        tensor_results
+        selected_tensors
       )
     end
   rescue
@@ -139,10 +139,11 @@ defmodule TrinityCoordinator.Sakana.PythonImporter do
            source_dir,
            manifest,
            [
-             "components_path",
-             "component_path",
-             "svf_components_path",
-             "components_file"
+             ["components_path"],
+             ["component_path"],
+             ["svf_components_path"],
+             ["components_file"],
+             ["outputs", "components"]
            ],
            @default_components
          ),
@@ -151,10 +152,11 @@ defmodule TrinityCoordinator.Sakana.PythonImporter do
            source_dir,
            manifest,
            [
-             "scale_offsets_path",
-             "scales_path",
-             "svf_scale_offsets_path",
-             "scale_offsets_file"
+             ["scale_offsets_path"],
+             ["scales_path"],
+             ["svf_scale_offsets_path"],
+             ["scale_offsets_file"],
+             ["outputs", "scale_offsets"]
            ],
            @default_scales
          ),
@@ -163,9 +165,10 @@ defmodule TrinityCoordinator.Sakana.PythonImporter do
            source_dir,
            manifest,
            [
-             "router_head_path",
-             "head_path",
-             "router_head_file"
+             ["router_head_path"],
+             ["head_path"],
+             ["router_head_file"],
+             ["outputs", "head"]
            ],
            @default_head
          )
@@ -173,15 +176,15 @@ defmodule TrinityCoordinator.Sakana.PythonImporter do
   end
 
   defp resolve_manifest_path(source_dir, manifest, keys, fallback) do
-    value = Enum.find_value(keys, &deep_get(manifest, [&1])) || fallback
+    value = Enum.find_value(keys, &deep_get(manifest, &1)) || fallback
     resolve_path(source_dir, value)
   end
 
   defp resolve_path(source_dir, path) when is_binary(path) do
-    if Path.type(path) == :absolute do
-      path
-    else
-      Path.join(source_dir, path)
+    cond do
+      Path.type(path) == :absolute -> path
+      File.exists?(path) -> path
+      true -> Path.join(source_dir, path)
     end
   end
 
@@ -198,8 +201,9 @@ defmodule TrinityCoordinator.Sakana.PythonImporter do
   defp maybe_load_json(nil), do: {:ok, nil}
   defp maybe_load_json(path), do: load_json(path)
 
-  defp read_safetensors(path) do
-    {:ok, Safetensors.read!(path)}
+  defp read_safetensors(path, opts \\ []) do
+    opts = Keyword.validate!(opts, lazy: false)
+    {:ok, Safetensors.read!(path, lazy: opts[:lazy])}
   rescue
     e -> {:error, {:safetensors_read_error, path, Exception.message(e)}}
   end
@@ -210,6 +214,7 @@ defmodule TrinityCoordinator.Sakana.PythonImporter do
         deep_get(python_manifest, ["selected_entries"]) ||
         deep_get(python_manifest, ["tensors"]) ||
         deep_get(python_manifest, ["svf", "selected_tensors"]) ||
+        deep_get(python_manifest, ["svf", "entries"]) ||
         deep_get(reference_manifest || %{}, ["selected_tensors"])
 
     if is_list(entries) and entries != [] do
@@ -287,27 +292,46 @@ defmodule TrinityCoordinator.Sakana.PythonImporter do
       source_name: source,
       elixir_name: elixir_name,
       shape: selected_entry_shape(entry, reference),
-      singular_values: first_metadata_value(entry, reference, "singular_values"),
+      singular_values:
+        first_metadata_value(entry, reference, ["singular_values", "num_singular_values"]),
       offset_start: first_metadata_value(entry, reference, "offset_start"),
       offset_end: first_metadata_value(entry, reference, "offset_end"),
       component_tensors: deep_get(entry, ["component_tensors"]) || %{},
       scale_tensor: deep_get(entry, ["scale_tensor"]),
-      safe_key: first_metadata_value(entry, reference, "safe_key")
+      safe_key: first_metadata_value(entry, reference, ["safe_key", "safe_parameter"]),
+      python_v_layout:
+        first_metadata_value(entry, reference, ["python_v_layout", "v_layout"]) || "torch_v"
     }
   end
 
   defp selected_entry_shape(entry, reference) do
-    entry
-    |> first_metadata_value(reference, "shape")
-    |> normalize_shape()
+    shape = first_metadata_value(entry, reference, "shape")
+
+    singular_values =
+      first_metadata_value(entry, reference, ["singular_values", "num_singular_values"])
+
+    if singular_value_shape?(shape, singular_values) do
+      nil
+    else
+      normalize_shape(shape)
+    end
   end
 
-  defp first_metadata_value(entry, reference, key) do
+  defp singular_value_shape?([value], value), do: true
+  defp singular_value_shape?({value}, value), do: true
+  defp singular_value_shape?(_shape, _singular_values), do: false
+
+  defp first_metadata_value(entry, reference, keys) when is_list(keys) do
+    Enum.find_value(keys, &first_metadata_value(entry, reference, &1))
+  end
+
+  defp first_metadata_value(entry, reference, key) when is_binary(key) do
     deep_get(entry, [key]) || deep_get(reference, [key])
   end
 
   defp source_name(entry) when is_map(entry) do
     deep_get(entry, ["source_name"]) ||
+      deep_get(entry, ["source_parameter"]) ||
       deep_get(entry, ["python_name"]) ||
       deep_get(entry, ["tensor_name"]) ||
       deep_get(entry, ["name"]) ||
@@ -333,6 +357,7 @@ defmodule TrinityCoordinator.Sakana.PythonImporter do
     key =
       deep_get(manifest, ["router_head_tensor"]) ||
         deep_get(manifest, ["router_head_key"]) ||
+        deep_get(manifest, ["routing", "head_tensor"]) ||
         @python_head_key
 
     case Map.get(head_file, key) || only_tensor_if_singleton(head_file) do
@@ -359,9 +384,38 @@ defmodule TrinityCoordinator.Sakana.PythonImporter do
 
   defp only_tensor_if_singleton(_), do: nil
 
-  defp reconstruct_all(entries, components, scales, targets, opts) do
-    results = Enum.map(entries, &reconstruct_one(&1, components, scales, targets, opts))
-    {:ok, results}
+  defp reconstruct_and_write_checkpoints(entries, components, scales, targets, opts) do
+    {selected_tensors, _cursor} =
+      Enum.map_reduce(entries, 0, fn entry, cursor ->
+        try do
+          emit(opts, %{
+            event: :python_import_tensor_started,
+            index: entry.index,
+            source_name: entry.source_name,
+            elixir_name: entry.elixir_name
+          })
+
+          result = reconstruct_one(entry, components, scales, targets, opts)
+          checkpoint_entry = write_checkpoint!(opts.out_dir, result, cursor)
+
+          emit(opts, %{
+            event: :python_import_tensor_checkpoint_written,
+            index: entry.index,
+            source_name: entry.source_name,
+            checkpoint_path: checkpoint_entry["checkpoint_path"],
+            checkpoint_sha256: checkpoint_entry["checkpoint_sha256"]
+          })
+
+          :erlang.garbage_collect()
+          {checkpoint_entry, checkpoint_entry["offset_end"]}
+        rescue
+          e ->
+            raise ArgumentError,
+                  "failed to reconstruct #{entry.source_name}: #{Exception.message(e)}"
+        end
+      end)
+
+    {:ok, selected_tensors}
   rescue
     e -> {:error, {:reconstruct_error, Exception.message(e)}}
   end
@@ -373,20 +427,22 @@ defmodule TrinityCoordinator.Sakana.PythonImporter do
     s = fetch_tensor!(components, keys.s, :component_s)
     v = fetch_tensor!(components, keys.v, :component_v)
     offsets = fetch_tensor!(scales, keys.scale, :scale_offsets)
+    target = Map.get(targets.by_path, entry.elixir_name)
+    v_layout = normalize_v_layout!(entry.python_v_layout)
 
     source_shape =
       normalize_shape(entry.shape) ||
-        Nx.shape(Nx.dot(Nx.multiply(u, Nx.reshape(s, {1, Nx.axis_size(s, 0)})), v))
+        source_shape_from_components(u, v, v_layout)
 
-    target = Map.get(targets.by_path, entry.elixir_name)
     target_shape = target_shape(target, source_shape)
-    source_reference = source_reference_tensor(target, source_shape)
-    v_layout = choose_python_v_layout(%{u: u, s: s, v: v}, source_reference)
+
+    u = transfer_for_target(u, target)
+    s = transfer_for_target(s, target)
+    v = transfer_for_target(v, target)
+    offsets = transfer_for_target(offsets, target)
 
     reconstructed =
-      SVD.reconstruct(%{u: u, s: s, v: v}, Nx.as_type(offsets, Nx.type(s)),
-        v_layout: v_layout.layout
-      )
+      SVD.reconstruct(%{u: u, s: s, v: v}, Nx.as_type(offsets, Nx.type(s)), v_layout: v_layout)
 
     reconstructed = orient_for_target!(reconstructed, target_shape, entry.elixir_name)
 
@@ -410,55 +466,39 @@ defmodule TrinityCoordinator.Sakana.PythonImporter do
       offset_start: entry.offset_start,
       offset_end: entry.offset_end,
       component_keys: keys,
-      python_v_layout: Atom.to_string(v_layout.layout),
-      python_component_zero_error: v_layout.zero_error,
+      python_v_layout: Atom.to_string(v_layout),
+      python_component_zero_error: nil,
       target_verified: targets.verified? and not is_nil(target)
     }
   end
 
-  defp source_reference_tensor(nil, _source_shape), do: nil
+  defp normalize_v_layout!("torch_v"), do: :torch_v
+  defp normalize_v_layout!("vh"), do: :vh
+  defp normalize_v_layout!("nx"), do: :nx
+  defp normalize_v_layout!(:torch_v), do: :torch_v
+  defp normalize_v_layout!(:vh), do: :vh
+  defp normalize_v_layout!(:nx), do: :nx
 
-  defp source_reference_tensor(%{tensor: %Nx.Tensor{} = tensor}, source_shape) do
-    tensor
-    |> Nx.as_type(:f32)
-    |> Nx.backend_transfer(Nx.BinaryBackend)
-    |> orient_for_target!(source_shape, "source_reference")
+  defp normalize_v_layout!(other) do
+    raise ArgumentError, "unsupported Python V layout #{inspect(other)}"
   end
 
-  defp choose_python_v_layout(_decomp, nil), do: %{layout: :torch_v, zero_error: nil}
+  defp source_shape_from_components(u, v, :torch_v),
+    do: {Nx.axis_size(u, 0), Nx.axis_size(v, 0)}
 
-  defp choose_python_v_layout(%{s: s} = decomp, %Nx.Tensor{} = source_reference) do
-    zeros = Nx.broadcast(0.0, Nx.shape(s)) |> Nx.as_type(Nx.type(s))
+  defp source_shape_from_components(u, v, _layout),
+    do: {Nx.axis_size(u, 0), Nx.axis_size(v, 1)}
 
-    [:nx, :torch_v]
-    |> Enum.map(fn layout ->
-      try do
-        reconstructed = SVD.reconstruct(decomp, zeros, v_layout: layout)
-        error = max_abs_error(reconstructed, source_reference)
-        %{layout: layout, zero_error: error}
-      rescue
-        _ -> %{layout: layout, zero_error: :infinity}
-      end
-    end)
-    |> Enum.reject(&(&1.zero_error == :infinity))
-    |> case do
-      [] ->
-        raise ArgumentError,
-              "no Python V layout can reconstruct source shape #{inspect(Nx.shape(source_reference))}"
+  defp transfer_for_target(%Nx.Tensor{} = tensor, nil), do: tensor
 
-      candidates ->
-        Enum.min_by(candidates, & &1.zero_error)
-    end
+  defp transfer_for_target(%Nx.Tensor{} = tensor, %{tensor: %Nx.Tensor{} = target}) do
+    Nx.backend_transfer(tensor, backend_from_label(Runtime.tensor_backend(target)))
   end
 
-  defp max_abs_error(left, right) do
-    left
-    |> Nx.as_type(:f32)
-    |> Nx.subtract(Nx.as_type(right, :f32))
-    |> Nx.abs()
-    |> Nx.reduce_max()
-    |> Nx.to_number()
-  end
+  defp backend_from_label("EXLA.Backend<cuda" <> _), do: {EXLA.Backend, client: :cuda}
+  defp backend_from_label("EXLA.Backend<host" <> _), do: {EXLA.Backend, client: :host}
+  defp backend_from_label("Nx.BinaryBackend"), do: Nx.BinaryBackend
+  defp backend_from_label(_), do: Nx.BinaryBackend
 
   defp component_keys(entry) do
     explicit = entry.component_tensors || %{}
@@ -480,6 +520,9 @@ defmodule TrinityCoordinator.Sakana.PythonImporter do
     case Map.get(map, key) do
       %Nx.Tensor{} = tensor ->
         tensor
+
+      %{} = lazy_tensor ->
+        Nx.with_default_backend(Nx.BinaryBackend, fn -> Nx.to_tensor(lazy_tensor) end)
 
       nil ->
         raise ArgumentError,
@@ -512,13 +555,11 @@ defmodule TrinityCoordinator.Sakana.PythonImporter do
          reference_manifest,
          paths,
          head_weights,
-         tensor_results
+         selected_tensors
        ) do
-    emit(opts, %{event: :python_import_write_started, tensors: length(tensor_results)})
+    emit(opts, %{event: :python_import_write_started, tensors: length(selected_tensors)})
 
     head_sha = write_router_head!(opts.out_dir, head_weights)
-    {selected_tensors, adapted_payload} = write_checkpoints!(opts.out_dir, tensor_results)
-    adapted_sha = write_adapted_tensors!(opts.out_dir, adapted_payload)
 
     singular_total = Enum.reduce(selected_tensors, 0, &(&1["singular_values"] + &2))
     now = DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601()
@@ -537,20 +578,23 @@ defmodule TrinityCoordinator.Sakana.PythonImporter do
       "python_manifest_path" => opts.python_manifest_path,
       "reference_manifest_path" => opts.reference_manifest_path,
       "source_vector_path" =>
-        deep_get(python_manifest, ["source_vector_path"]) || "python_semantic_bundle",
+        deep_get(python_manifest, ["source_vector_path"]) ||
+          deep_get(python_manifest, ["source", "router_vector"]) ||
+          "python_semantic_bundle",
       "source_vector_tensor" =>
         deep_get(python_manifest, ["source_vector_tensor"]) || "python_semantic_components",
       "source_vector_shape" => source_vector_shape(python_manifest, singular_total, head_weights),
       "source_vector_sha256" =>
-        deep_get(python_manifest, ["source_vector_sha256"]) || source_bundle_hash(paths),
+        deep_get(python_manifest, ["source_vector_sha256"]) ||
+          deep_get(python_manifest, ["source", "router_vector_sha256"]) ||
+          source_bundle_hash(paths),
       "scale_offset_count" => singular_total,
       "router_head_shape" => Tuple.to_list(Nx.shape(head_weights)),
       "router_head_artifact" => Artifact.router_head_file(),
       "router_head_tensor_key" => Artifact.router_head_tensor_key(),
       "router_head_sha256" => head_sha,
       "adapted_tensors_artifact" => Artifact.adapted_tensors_file(),
-      "adapted_tensors_sha256" => adapted_sha,
-      "artifact_layout" => Artifact.artifact_layout_single_file(),
+      "artifact_layout" => Artifact.artifact_layout_checkpoint_directory(),
       "selected_tensor_count" => length(selected_tensors),
       "selected_singular_value_count" => singular_total,
       "export_complete" => true,
@@ -586,64 +630,49 @@ defmodule TrinityCoordinator.Sakana.PythonImporter do
     Artifact.file_sha256!(path)
   end
 
-  defp write_checkpoints!(out_dir, tensor_results) do
-    {entries, {payload, _cursor}} =
-      Enum.map_reduce(tensor_results, {%{}, 0}, fn result, {payload, cursor} ->
-        rel =
-          Path.join(
-            Artifact.checkpoint_directory_name(),
-            checkpoint_file(result.index, result.path)
-          )
+  defp write_checkpoint!(out_dir, result, cursor) do
+    rel =
+      Path.join(
+        Artifact.checkpoint_directory_name(),
+        checkpoint_file(result.index, result.path)
+      )
 
-        full = Path.join(out_dir, rel)
-        tmp = full <> ".tmp"
-        File.mkdir_p!(Path.dirname(full))
+    full = Path.join(out_dir, rel)
+    tmp = full <> ".tmp"
+    File.mkdir_p!(Path.dirname(full))
 
-        host_tensor = Nx.backend_transfer(result.tensor, Nx.BinaryBackend)
-        Safetensors.write!(tmp, %{result.artifact_key => host_tensor})
-        File.rename!(tmp, full)
-        sha = Artifact.file_sha256!(full)
+    host_tensor = Nx.backend_transfer(result.tensor, Nx.BinaryBackend)
+    Safetensors.write!(tmp, %{result.artifact_key => host_tensor})
+    File.rename!(tmp, full)
+    sha = Artifact.file_sha256!(full)
 
-        offset_start = result.offset_start || cursor
-        offset_end = result.offset_end || offset_start + result.singular_values
+    offset_start = result.offset_start || cursor
+    offset_end = result.offset_end || offset_start + result.singular_values
 
-        entry = %{
-          "index" => result.index,
-          "path" => result.path,
-          "source_name" => result.source_name,
-          "artifact_key" => result.artifact_key,
-          "segments" => result.segments,
-          "shape" => Tuple.to_list(result.shape),
-          "type" => result.type,
-          "source_type" => result.type,
-          "status" => "complete",
-          "offset_start" => offset_start,
-          "offset_end" => offset_end,
-          "singular_values" => result.singular_values,
-          "checkpoint_path" => rel,
-          "checkpoint_sha256" => sha,
-          "component_keys" => result.component_keys,
-          "python_v_layout" => Map.get(result, :python_v_layout),
-          "python_component_zero_error" => Map.get(result, :python_component_zero_error),
-          "target_verified" => result.target_verified,
-          "backend_observed_during_export" =>
-            TrinityCoordinator.Runtime.tensor_backend(result.tensor),
-          "adapted_backend" => TrinityCoordinator.Runtime.tensor_backend(result.tensor),
-          "error" => nil
-        }
-
-        {entry, {Map.put(payload, result.artifact_key, host_tensor), offset_end}}
-      end)
-
-    {entries, payload}
-  end
-
-  defp write_adapted_tensors!(out_dir, payload) do
-    path = Path.join(out_dir, Artifact.adapted_tensors_file())
-    tmp = path <> ".tmp"
-    Safetensors.write!(tmp, payload)
-    File.rename!(tmp, path)
-    Artifact.file_sha256!(path)
+    %{
+      "index" => result.index,
+      "path" => result.path,
+      "source_name" => result.source_name,
+      "artifact_key" => result.artifact_key,
+      "segments" => result.segments,
+      "shape" => Tuple.to_list(result.shape),
+      "type" => result.type,
+      "source_type" => result.type,
+      "status" => "complete",
+      "offset_start" => offset_start,
+      "offset_end" => offset_end,
+      "singular_values" => result.singular_values,
+      "checkpoint_path" => rel,
+      "checkpoint_sha256" => sha,
+      "component_keys" => result.component_keys,
+      "python_v_layout" => Map.get(result, :python_v_layout),
+      "python_component_zero_error" => Map.get(result, :python_component_zero_error),
+      "target_verified" => result.target_verified,
+      "backend_observed_during_export" =>
+        TrinityCoordinator.Runtime.tensor_backend(result.tensor),
+      "adapted_backend" => TrinityCoordinator.Runtime.tensor_backend(result.tensor),
+      "error" => nil
+    }
   end
 
   defp checkpoint_file(index, path) do
