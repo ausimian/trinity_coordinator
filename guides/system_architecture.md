@@ -18,6 +18,16 @@ The intended service path is:
 9. `AgentPool` dispatches the provider call.
 10. The trace layer records what happened.
 
+The supplemental Python runtime adds three compatibility details that matter
+for the Elixir service:
+
+- router hidden extraction uses the no-generation path with Qwen3 thinking
+  disabled and hidden position `-2`;
+- role logits use Python order `solver`, `thinker`, `verifier`, where `solver`
+  is the paper's Worker role;
+- the Python evaluation loop samples agent and role separately from softmax
+  probabilities, while Elixir tests should also support deterministic argmax.
+
 ## Core Modules
 
 `TrinityCoordinator.Runtime`
@@ -119,6 +129,27 @@ Native Elixir SVD path:
 
 The active parity loop should use `--semantic-only` unless the question is
 specifically about native Nx SVD.
+
+## Supplemental Runtime Contract
+
+The checkpoint metadata under
+`docs/priv/trinity_code_submission/logs/ckpt/es_log.json` is authoritative for
+the imported vector:
+
+```text
+model: Qwen/Qwen3-0.6B
+agents: 7
+roles: 3
+head shape: {10, 1024}
+SVF layer: 26
+max turns: 5
+max tokens: 4096
+temperature: 0.1
+last_token_predict: false
+```
+
+The service implementation should preserve this compatibility mode before
+introducing cleaner production aliases or policy changes.
 
 ## Why Exact Hashes Are Not The Only Contract
 

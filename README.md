@@ -22,6 +22,12 @@ LLM provider calls.
 The current focus is parity and service foundation, not reproducing the original
 training experiment.
 
+The original paper sources and the full supplemental Python submission have
+been audited. The supplemental checkpoint metadata is now treated as the
+compatibility source of truth for the imported artifact path: Qwen3-0.6B,
+layer-26 SVF, seven agents, five turns, no-generation penultimate hidden-state
+extraction, and raw role order `solver`, `thinker`, `verifier`.
+
 ## Current Direction
 
 The active lane is:
@@ -59,11 +65,16 @@ Current parity result:
 
 - Python in-memory and Python safetensors readback both produce
   `5aaa24c15898794dec09dccae650e35549c33cc24815e70ac6641cc3b466b725`.
-- Elixir semantic `torch_v` currently produces
-  `bf089ea0607c93ae69f92bf7b9fcf71dc2a2b53d231cfe307b8cd6f4ef6a85ae`.
+- Elixir semantic `torch_v` currently produces non-matching final `bf16`
+  hashes in recent reports.
 - Source tensors, offsets, and scaled singular values byte-match.
 - Required f32 reconstruction stages pass explicit tolerances.
 - Final `bf16` byte matching remains aspirational and is reported separately.
+
+Recent non-matching Elixir final hashes have included
+`bf089ea0607c93ae69f92bf7b9fcf71dc2a2b53d231cfe307b8cd6f4ef6a85ae` and
+`74dc61d765c95e80ca7298b6e97f29a4fd76e2ae4bfb348b2abbffcbc5e0dff8`.
+The stage report, not the final Elixir hash alone, is the correctness verdict.
 
 ## Start Here
 

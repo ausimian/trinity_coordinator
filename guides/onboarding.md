@@ -46,6 +46,9 @@ Not complete yet:
 - Provider LLM calls are still mostly at the boundary/mock phase in tests.
 - The old experiment-reproduction lane is shelved and should be removed or
   archived once this parity lane is fully stable.
+- The supplemental Python submission has been audited for runtime semantics.
+  Its checkpoint metadata is the source of truth for agent order, role order,
+  selected SVF layer, turn budget, and router hidden extraction mode.
 
 ## Required Local Environment
 
@@ -150,3 +153,5 @@ only when intentionally pursuing byte-for-byte equality.
 - `guides/stage_checks_and_tolerances.md`: the correctness standard.
 - `guides/service_buildout.md`: what remains before the coordinator can run in
   service.
+- `docs/priv/20260428/`: private implementation-ready source audit,
+  semantics contract, milestone checklist, and quality-gate runbook.

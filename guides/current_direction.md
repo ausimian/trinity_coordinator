@@ -37,6 +37,13 @@ That code was useful for understanding the paper, but it is not needed for the
 current foundation. The current foundation is the artifact path: consume the
 available Sakana outputs correctly and make the coordinator operational.
 
+The full supplemental Python submission in `docs/priv/trinity_code_submission`
+has now been audited as the executable specification for runtime semantics. It
+confirms the imported checkpoint uses `Qwen/Qwen3-0.6B`, layer 26 SVF, seven
+agents, five coordination turns, a biasless linear `{10, 1024}` head, no
+generation for router hidden extraction, and role order `solver`, `thinker`,
+`verifier`. The paper's `Worker` role maps to the Python code's `solver` role.
+
 ## Planned Cleanup
 
 After the Qwen/Sakana parity and runtime artifact path is stable, remove or
@@ -97,10 +104,13 @@ Current Python in-memory and Python safetensors readback both produce:
 5aaa24c15898794dec09dccae650e35549c33cc24815e70ac6641cc3b466b725
 ```
 
-Elixir semantic `torch_v` currently produces:
+Elixir semantic `torch_v` currently produces non-matching final `bf16` hashes
+in recent reports.
 
 ```text
+observed examples:
 bf089ea0607c93ae69f92bf7b9fcf71dc2a2b53d231cfe307b8cd6f4ef6a85ae
+74dc61d765c95e80ca7298b6e97f29a4fd76e2ae4bfb348b2abbffcbc5e0dff8
 ```
 
 The stage checks isolate the mismatch:
@@ -112,3 +122,5 @@ The stage checks isolate the mismatch:
 
 This makes the current state functionally correct under the declared standard,
 while exact final byte matching remains an open optimization/debug target.
+The stage-bundle report, not the final Elixir hash alone, is the correctness
+verdict.

@@ -37,13 +37,16 @@ Do not use that hash as a default oracle unless the original `svd_weights.pt` or
 equivalent original component provenance is supplied and Python itself reports
 `reference_hash_reproducible: True`.
 
-The latest semantic Elixir `torch_v` path does not byte-match Python:
+The semantic Elixir `torch_v` path does not byte-match Python. Recent
+non-matching final `bf16` hashes have included:
 
 ```text
 bf089ea0607c93ae69f92bf7b9fcf71dc2a2b53d231cfe307b8cd6f4ef6a85ae
+74dc61d765c95e80ca7298b6e97f29a4fd76e2ae4bfb348b2abbffcbc5e0dff8
 ```
 
-Stage checks show why. Source tensor, offsets, and scaled singular values
+Treat the exact Elixir hash as report metadata, not as the verdict. Stage
+checks show why. Source tensor, offsets, and scaled singular values
 byte-match. The first relevant non-byte-identical numerical stage is the large
 matrix multiply/reconstruction, where Nx and PyTorch use different accumulation
 behavior. The observed f32 gap is small enough for functional parity under the

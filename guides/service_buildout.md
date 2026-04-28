@@ -17,6 +17,16 @@ The target runtime loop is:
 8. Persist a trace.
 9. Continue until verifier acceptance or budget exhaustion.
 
+Compatibility mode should mirror the supplemental Python loop:
+
+- split logits into seven agent logits and three role logits;
+- preserve raw role order `solver`, `thinker`, `verifier`;
+- expose paper-facing `Worker` as an alias for raw `solver`, not a new role id;
+- support stochastic softmax sampling for trace reproduction;
+- support deterministic argmax for tests and operator debugging;
+- allow a thinker response to set `<suggested_role>solver</suggested_role>` or
+  `<suggested_role>verifier</suggested_role>` for the next turn.
+
 ## What Is Already In Place
 
 - Core extractor/head/orchestrator contracts.
@@ -44,6 +54,21 @@ Strengthen provider integration:
 - replace mock-heavy checks with explicit credential-gated smoke tests;
 - record provider model, endpoint, latency, and error class in traces;
 - make provider failure behavior explicit.
+
+The checkpoint agent order is:
+
+```text
+0 gpt-5
+1 claude-sonnet-4-20250514
+2 gemini-2.5-pro
+3 deepseek-ai/DeepSeek-R1-Distill-Qwen-32B
+4 google/gemma-3-27b-it
+5 Qwen/Qwen3-32B (reasoning)
+6 Qwen/Qwen3-32B (direct)
+```
+
+Any production pool may remap providers, but imported checkpoint logits only
+have a defensible interpretation when this order is explicit.
 
 Build service ergonomics:
 
