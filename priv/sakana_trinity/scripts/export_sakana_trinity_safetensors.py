@@ -255,7 +255,7 @@ def main() -> None:
         },
         "routing": {
             "agent_labels": llm_names,
-            "role_labels": ["thinker", "worker", "verifier"][: args.role_count],
+            "role_labels": ["solver", "thinker", "verifier"][: args.role_count],
             "output_count": output_count,
             "head_type": "linear",
             "head_tensor": "trinity.router_head.linear.weight",
@@ -290,4 +290,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

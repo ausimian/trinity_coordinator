@@ -10,7 +10,7 @@ defmodule TrinityCoordinator do
   - `TrinityCoordinator.Runtime` for EXLA/CUDA checks.
   """
 
-  @roles %{0 => "Thinker", 1 => "Worker", 2 => "Verifier"}
+  @roles %{0 => "Worker", 1 => "Thinker", 2 => "Verifier"}
   @gpu_demo_command "XLA_TARGET=cuda12 mix trinity.demo"
 
   @doc """
@@ -19,7 +19,7 @@ defmodule TrinityCoordinator do
   ## Examples
 
       iex> TrinityCoordinator.roles()
-      %{0 => "Thinker", 1 => "Worker", 2 => "Verifier"}
+      %{0 => "Worker", 1 => "Thinker", 2 => "Verifier"}
 
   """
   def roles, do: @roles

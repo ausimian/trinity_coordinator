@@ -29,11 +29,13 @@ defmodule TrinityCoordinator.RoleInjectorTest do
   end
 
   test "accepts role ids and atoms" do
-    assert RoleInjector.role_name(0) == "Thinker"
+    assert RoleInjector.role_name(0) == "Worker"
+    assert RoleInjector.role_name("solver") == "Worker"
     assert RoleInjector.role_name(:worker) == "Worker"
     assert RoleInjector.role_name("v") == "Verifier"
     assert RoleInjector.role_atom("Verifier") == :verifier
-    assert RoleInjector.role_id(:thinker) == 0
+    assert RoleInjector.role_id(:worker) == 0
+    assert RoleInjector.role_id(:thinker) == 1
 
     assert RoleInjector.inject_role([], :verifier)
            |> hd()

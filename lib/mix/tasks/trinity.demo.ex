@@ -200,8 +200,8 @@ defmodule Mix.Tasks.Trinity.Demo do
     |> inspect()
   end
 
-  defp role_name(0), do: "Thinker"
-  defp role_name(1), do: "Worker"
+  defp role_name(0), do: "Worker"
+  defp role_name(1), do: "Thinker"
   defp role_name(2), do: "Verifier"
   defp role_name(_), do: "Unknown"
 

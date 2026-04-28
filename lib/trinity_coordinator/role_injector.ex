@@ -2,19 +2,21 @@ defmodule TrinityCoordinator.RoleInjector do
   @moduledoc """
   Injects role-specific system prompts into the conversation transcript.
 
-  The public functions accept role ids, atoms, and paper-style role names:
+  The public functions accept role ids, atoms, and paper-style role names.
+  Integer ids follow the imported Sakana/TRINITY checkpoint order:
 
-    * `0`, `:thinker`, `"Thinker"`
-    * `1`, `:worker`, `"Worker"`
+    * `0`, `:worker`, `"Worker"` (Python `solver`)
+    * `1`, `:thinker`, `"Thinker"`
     * `2`, `:verifier`, `"Verifier"`
   """
 
-  @role_names %{0 => "Thinker", 1 => "Worker", 2 => "Verifier"}
+  @role_names %{0 => "Worker", 1 => "Thinker", 2 => "Verifier"}
 
   @role_aliases %{
-    "0" => "Thinker",
-    "1" => "Worker",
+    "0" => "Worker",
+    "1" => "Thinker",
     "2" => "Verifier",
+    "solver" => "Worker",
     "t" => "Thinker",
     "thinker" => "Thinker",
     "v" => "Verifier",
@@ -77,8 +79,8 @@ defmodule TrinityCoordinator.RoleInjector do
   """
   def role_id(role) do
     case role_name(role) do
-      "Thinker" -> 0
-      "Worker" -> 1
+      "Worker" -> 0
+      "Thinker" -> 1
       "Verifier" -> 2
       _ -> nil
     end

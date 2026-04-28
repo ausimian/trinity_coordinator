@@ -3,7 +3,7 @@ defmodule TrinityCoordinatorTest do
   doctest TrinityCoordinator
 
   test "exposes canonical role metadata" do
-    assert TrinityCoordinator.roles() == %{0 => "Thinker", 1 => "Worker", 2 => "Verifier"}
+    assert TrinityCoordinator.roles() == %{0 => "Worker", 1 => "Thinker", 2 => "Verifier"}
   end
 
   test "exposes the real GPU demo command" do

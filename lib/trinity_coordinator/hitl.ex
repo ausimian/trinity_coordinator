@@ -61,8 +61,8 @@ defmodule TrinityCoordinator.HITL do
     :ok
   end
 
-  def role_name(0), do: "Thinker"
-  def role_name(1), do: "Worker"
+  def role_name(0), do: "Worker"
+  def role_name(1), do: "Thinker"
   def role_name(2), do: "Verifier"
   def role_name(_), do: "Unknown"
 

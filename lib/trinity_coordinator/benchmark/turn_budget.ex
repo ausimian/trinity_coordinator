@@ -106,8 +106,8 @@ defmodule TrinityCoordinator.Benchmark.TurnBudget do
       |> then(fn route ->
         role_name =
           case route.role_id do
-            0 -> "Thinker"
-            1 -> "Worker"
+            0 -> "Worker"
+            1 -> "Thinker"
             2 -> "Verifier"
             _ -> "Unknown"
           end
