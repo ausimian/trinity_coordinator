@@ -96,6 +96,8 @@ def collect_stage_checks(report: dict[str, Any]) -> list[dict[str, Any]]:
             if isinstance(check, dict):
                 check = dict(check)
                 check["variant_label"] = variant.get("label")
+                check["source_name"] = variant.get("source_name")
+                check["elixir_name"] = variant.get("elixir_name")
                 checks.append(check)
     return checks
 
@@ -127,6 +129,20 @@ def print_stage_checks(checks: list[dict[str, Any]]) -> bool:
         return False
 
     print("\nStage checks against Python stage tensors:")
+    sources = sorted({str(check.get("source_name")) for check in checks if check.get("source_name")})
+    required_checks = [
+        check for check in checks if boolish(check.get("required_for_functional_parity"))
+    ]
+    failed_required = [
+        check for check in required_checks if not boolish(check.get("functional_passed"))
+    ]
+    print(
+        "  "
+        f"selected_tensors_checked={len(sources) if sources else 'unknown'} "
+        f"total_checks={len(checks)} required_checks={len(required_checks)} "
+        f"failed_required={len(failed_required)}"
+    )
+
     all_required_passed = True
     for check in checks:
         required = boolish(check.get("required_for_functional_parity"))
@@ -135,13 +151,33 @@ def print_stage_checks(checks: list[dict[str, Any]]) -> bool:
             all_required_passed = False
         print(
             "  "
-            f"{check.get('variant_label')} {check.get('stage')}: "
+            f"{check.get('variant_label')} {check.get('source_name') or ''} {check.get('stage')}: "
             f"required={required} functional_passed={passed} "
             f"byte_match={check.get('byte_match')} shape_match={check.get('shape_match')} "
             f"max_abs={check.get('max_abs_error')} mean_abs={check.get('mean_abs_error')} "
             f"mismatches={check.get('mismatched_element_count')} "
             f"tol={check.get('tolerance')}"
         )
+
+    worst = sorted(
+        (
+            check
+            for check in checks
+            if isinstance(check.get("max_abs_error"), (int, float))
+        ),
+        key=lambda check: float(check.get("max_abs_error", 0.0)),
+        reverse=True,
+    )[:5]
+    if worst:
+        print("  worst_max_abs_stages:")
+        for check in worst:
+            print(
+                "    "
+                f"{check.get('source_name') or '(sample)'} {check.get('stage')} "
+                f"max_abs={check.get('max_abs_error')} mean_abs={check.get('mean_abs_error')} "
+                f"required={boolish(check.get('required_for_functional_parity'))}"
+            )
+
     return all_required_passed
 
 

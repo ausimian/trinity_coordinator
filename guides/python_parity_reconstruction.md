@@ -114,6 +114,34 @@ recompute every selected SVD from the base model, add
 set includes embedding and LM-head matrices and can otherwise create an
 accidental long-running decomposition job.
 
+All-selected mode writes the legacy sample stage bundle and, additionally:
+
+```text
+tmp/sakana_parity/python_components/trinity_svf_all_selected_stage_debug.safetensors
+```
+
+The all-selected stage bundle keys are namespaced per source tensor:
+
+```text
+tensor.<safe_source_name>.source_f32
+tensor.<safe_source_name>.offsets_f32
+tensor.<safe_source_name>.scaled_s
+tensor.<safe_source_name>.normalization
+tensor.<safe_source_name>.u_scaled
+tensor.<safe_source_name>.matmul_pre_norm
+tensor.<safe_source_name>.zero_source_f32
+tensor.<safe_source_name>.adapted_source_f32
+tensor.<safe_source_name>.final_f32
+tensor.<safe_source_name>.final_bf16
+```
+
+For non-sample selected tensors, `final_f32` and `final_bf16` are
+source-oriented. Target-orientation validation belongs to canonical artifact
+import and adapted profile loading, where the Bumblebee parameter path is known.
+This keeps the all-selected parity gate focused on Python component semantics:
+same source tensor, same offsets, same `U/S/V`, same formula, and declared
+numeric tolerances.
+
 ## Elixir Semantic Reconstruction
 
 Run:
@@ -142,6 +170,9 @@ Important options:
   `torch_v`, instead of repeating known-wrong `nx` and `vh` diagnostics.
 - `--device-semantic-only`: run semantic reconstruction on EXLA CUDA and avoid a
   large Nx BinaryBackend CPU matmul.
+- `--all-selected-tensors`: replay every selected tensor from the Python
+  component metadata and compare against the all-selected Python stage bundle.
+  Use it only with an all-selected Python report.
 
 Use the slower layout-diagnostic command only when investigating orientation:
 
@@ -157,6 +188,26 @@ XLA_TARGET=cuda12 mix trinity.sakana.parity_sample \
 The semantic `torch_v` variant is the active functional-parity target. The
 recommended fast command emits the device `torch_v` variant and still writes the
 same required stage checks.
+
+All-selected replay command:
+
+```bash
+XLA_TARGET=cuda12 mix trinity.sakana.parity_sample \
+  --semantic-only \
+  --device-semantic-only \
+  --preferred-layout-only \
+  --source-from-python-stage \
+  --all-selected-tensors \
+  --components-dir tmp/sakana_parity/python_components \
+  --python-report tmp/sakana_parity/python_sample_trace.json \
+  --stage-dir tmp/sakana_parity/elixir_stages \
+  --out tmp/sakana_parity/elixir_sample_trace.json
+```
+
+This command requires `stage_debug.all_selected_stage_tensor_file` in the Python
+report. Missing all-selected stage tensors are treated as a setup error, not as
+a tolerated fallback, because the full gate must prove each selected source
+tensor explicitly.
 
 ## Comparison
 

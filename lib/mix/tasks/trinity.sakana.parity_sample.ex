@@ -69,6 +69,7 @@ defmodule Mix.Tasks.Trinity.Sakana.ParitySample do
             Keyword.get(opts, :device_semantic_only, false),
         semantic_layout_diagnostics?: not Keyword.get(opts, :preferred_layout_only, false),
         source_from_python_stage?: Keyword.get(opts, :source_from_python_stage, false),
+        all_selected_tensors?: Keyword.get(opts, :all_selected_tensors, false),
         require_cuda: not Keyword.get(opts, :no_cuda, false)
       )
 
@@ -96,6 +97,7 @@ defmodule Mix.Tasks.Trinity.Sakana.ParitySample do
           device_semantic_only: :boolean,
           preferred_layout_only: :boolean,
           source_from_python_stage: :boolean,
+          all_selected_tensors: :boolean,
           skip_native_svd: :boolean
         ]
       )

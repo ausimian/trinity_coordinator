@@ -85,6 +85,18 @@ Without `--svd-weights`, this all-selected debug mode fails fast unless
 normal parity loop from accidentally decomposing the large embedding and LM-head
 matrices.
 
+All-selected debug mode also writes:
+
+```text
+trinity_svf_all_selected_stage_debug.safetensors
+```
+
+That file is not the canonical runtime artifact. It is a diagnostic bundle for
+the all-selected parity gate. Its final stage tensors are source-oriented for
+every selected tensor; canonical target-orientation validation happens later
+when `mix trinity.sakana.import_python` materializes the runtime artifact layout
+and checks the Bumblebee parameter names, shapes, and checkpoint hashes.
+
 For broader export, use:
 
 ```bash

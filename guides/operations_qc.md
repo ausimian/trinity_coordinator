@@ -74,6 +74,13 @@ python3 priv/sakana_trinity/scripts/compare_sakana_parity_reports.py \
 
 This is the required parity gate.
 
+When validating the full selected tensor set, generate Python with
+`--all-selected-tensors --svd-weights path/to/svd_weights.pt`, then add
+`--all-selected-tensors` to the Elixir command above. That mode reads
+`trinity_svf_all_selected_stage_debug.safetensors` and fails strict stage
+tolerances if any required stage fails for any selected tensor. It can emit very
+large diagnostic tensors, so it is not the default commit-loop command.
+
 The additional Elixir flags are intentional for commit-loop parity work:
 
 - `--source-from-python-stage` avoids loading Qwen only to fetch the sample

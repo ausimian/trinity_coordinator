@@ -189,6 +189,37 @@ python3 priv/sakana_trinity/scripts/compare_sakana_parity_reports.py \
 That exact-byte gate is expected to fail in the current state while functional
 stage parity passes.
 
+For the opt-in all-selected tensor gate, generate Python components and the
+source-oriented all-selected stage bundle with original SVD components:
+
+```bash
+python3 priv/sakana_trinity/scripts/debug_sakana_parity_sample.py \
+  --model-torch-dtype float32 \
+  --svd-weights path/to/svd_weights.pt \
+  --all-selected-tensors \
+  --out tmp/sakana_parity/python_sample_trace.json \
+  --write-components-dir tmp/sakana_parity/python_components
+```
+
+Then replay every selected tensor from those Python components:
+
+```bash
+XLA_TARGET=cuda12 mix trinity.sakana.parity_sample \
+  --semantic-only \
+  --device-semantic-only \
+  --preferred-layout-only \
+  --source-from-python-stage \
+  --all-selected-tensors \
+  --components-dir tmp/sakana_parity/python_components \
+  --python-report tmp/sakana_parity/python_sample_trace.json \
+  --stage-dir tmp/sakana_parity/elixir_stages \
+  --out tmp/sakana_parity/elixir_sample_trace.json
+```
+
+This path is deliberately explicit because it can materialize very large stage
+tensors for the embedding and LM-head matrices. Without `--svd-weights`, the
+Python script still requires `--decompose-all-selected-if-missing`.
+
 ## Runtime Shape
 
 The intended service path is:

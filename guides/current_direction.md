@@ -66,9 +66,12 @@ large cleanup diff on top.
 ## Near-Term Milestones
 
 1. Extend sample parity to all selected tensors:
-   - Python emits stage/debug data for every selected tensor.
-   - Elixir replays every selected tensor from Python components.
+   - Python emits source-oriented stage/debug data for every selected tensor.
+   - Elixir replays every selected tensor from Python components with
+     `--all-selected-tensors`.
    - The comparator fails if any required stage for any selected tensor fails.
+   - Final `bf16` byte equality remains reported as an aspirational diagnostic,
+     not the required gate.
 2. Import the full Python semantic export bundle into canonical Elixir
    artifacts:
    - use `export_sakana_trinity_safetensors.py` for the full export bundle;

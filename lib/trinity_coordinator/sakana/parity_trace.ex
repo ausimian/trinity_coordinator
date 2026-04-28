@@ -28,6 +28,18 @@ defmodule TrinityCoordinator.Sakana.ParityTrace do
   @output_count 10
   @component_file "trinity_svf_components.safetensors"
   @scale_file "trinity_svf_scale_offsets.safetensors"
+  @stage_names [
+    "source_f32",
+    "offsets_f32",
+    "scaled_s",
+    "normalization",
+    "u_scaled",
+    "matmul_pre_norm",
+    "zero_source_f32",
+    "adapted_source_f32",
+    "final_f32",
+    "final_bf16"
+  ]
 
   @type report :: map()
 
@@ -46,6 +58,7 @@ defmodule TrinityCoordinator.Sakana.ParityTrace do
         semantic_device?: true,
         semantic_layout_diagnostics?: true,
         source_from_python_stage?: false,
+        all_selected_tensors?: false,
         require_cuda: true
       )
 
@@ -59,7 +72,12 @@ defmodule TrinityCoordinator.Sakana.ParityTrace do
     sample = Map.fetch!(reference, "sample_adapted_tensor")
     python_report = maybe_load_json(opts[:python_report_path])
     python_baseline = current_python_baseline(python_report)
-    python_stage_tensors = python_report |> python_stage_file() |> maybe_read_safetensors()
+    python_stage_tensors = python_report |> python_stage_file(:sample) |> maybe_read_safetensors()
+
+    python_all_selected_stage_tensors =
+      python_report
+      |> python_stage_file(:all_selected)
+      |> maybe_read_safetensors()
 
     vector = SVD.load_router_vector!(opts[:router_vector_path])
     split = SVD.split_router_vector(vector, @scale_count, @hidden_size, @output_count)
@@ -95,10 +113,15 @@ defmodule TrinityCoordinator.Sakana.ParityTrace do
       python_baseline: python_baseline,
       component_metadata: component_metadata,
       python_stage_tensors: python_stage_tensors,
+      python_all_selected_stage_tensors: python_all_selected_stage_tensors,
       stage_dir: opts[:stage_dir],
       semantic_host?: opts[:semantic_host?],
       semantic_device?: opts[:semantic_device?],
-      semantic_layout_diagnostics?: opts[:semantic_layout_diagnostics?]
+      semantic_layout_diagnostics?: opts[:semantic_layout_diagnostics?],
+      all_selected_tensors?: opts[:all_selected_tensors?],
+      source_from_python_stage?: opts[:source_from_python_stage?],
+      reference: reference,
+      sample: sample
     }
 
     semantic =
@@ -142,7 +165,9 @@ defmodule TrinityCoordinator.Sakana.ParityTrace do
         "diagnostic_snapshots_backend" => Runtime.tensor_backend(source_host),
         "compute_backend" => inspect(compute_backend || Nx.BinaryBackend),
         "native_svd_enabled" => opts[:native?],
-        "source_from_python_stage" => source_context.from_python_stage?
+        "source_from_python_stage" => source_context.from_python_stage?,
+        "all_selected_tensors" => opts[:all_selected_tensors?],
+        "python_all_selected_stage_loaded" => not is_nil(python_all_selected_stage_tensors)
       },
       "router_vector" => tensor_summary(vector_host, prefix_count: 8),
       "scale_offsets" => tensor_summary(offsets_host, prefix_count: 16),
@@ -288,33 +313,39 @@ defmodule TrinityCoordinator.Sakana.ParityTrace do
     if File.exists?(component_path) and File.exists?(scale_path) do
       components = Safetensors.read!(component_path)
       scales = Safetensors.read!(scale_path)
-      safe_key = sanitize_python_key(sample["source_name"])
-      u = fetch_tensor!(components, "svd.U.#{safe_key}") |> host_snapshot()
-      s = fetch_tensor!(components, "svd.S.#{safe_key}") |> host_snapshot()
-      v = fetch_tensor!(components, "svd.V.#{safe_key}") |> host_snapshot()
-      offsets = fetch_tensor!(scales, "svf.scale_offsets.#{safe_key}") |> host_snapshot()
-      decomp_host = %{u: u, s: s, v: v}
-      stage_context = %{python_tensors: context.python_stage_tensors, dir: context.stage_dir}
+      entries = semantic_entries(sample, context)
 
-      for compute_target <-
-            semantic_compute_targets(
-              context.compute_backend,
-              context.semantic_host?,
-              context.semantic_device?
-            ),
-          layout <-
-            semantic_layouts(
-              context.component_metadata,
-              context.semantic_layout_diagnostics?
-            ) do
+      compute_targets =
+        semantic_compute_targets(
+          context.compute_backend,
+          context.semantic_host?,
+          context.semantic_device?
+        )
+
+      layouts = semantic_layouts(context.component_metadata, context.semantic_layout_diagnostics?)
+
+      for entry <- entries,
+          compute_target <- compute_targets,
+          layout <- layouts do
+        sample_contract = sample_contract_for_entry(entry, sample)
+        safe_key = entry_safe_key(entry)
+        keys = component_keys(entry, safe_key)
+        u = fetch_tensor!(components, keys.u) |> host_snapshot()
+        s = fetch_tensor!(components, keys.s) |> host_snapshot()
+        v = fetch_tensor!(components, keys.v) |> host_snapshot()
+        offsets = fetch_tensor!(scales, keys.offsets) |> host_snapshot()
+        decomp_host = %{u: u, s: s, v: v}
+        entry_stage_context = stage_context_for_entry(entry, safe_key, source_host, context)
+        source_for_entry = Map.fetch!(entry_stage_context, :source_tensor)
+
         layout
         |> safe_semantic_variant(
           decomp_host,
           offsets,
-          source_host,
-          sample,
+          source_for_entry,
+          sample_contract,
           compute_target,
-          stage_context
+          entry_stage_context
         )
         |> add_python_match(context.python_baseline)
       end
@@ -325,6 +356,140 @@ defmodule TrinityCoordinator.Sakana.ParityTrace do
         "scale_path" => scale_path
       }
     end
+  end
+
+  defp semantic_entries(_sample, %{all_selected_tensors?: true} = context) do
+    entries =
+      context.component_metadata
+      |> selected_entries_from_metadata()
+      |> case do
+        [] -> Map.get(context.reference, "selected_tensors", [])
+        selected -> selected
+      end
+
+    if entries == [] do
+      raise ArgumentError, "all-selected semantic replay requires selected_tensors metadata"
+    end
+
+    entries
+  end
+
+  defp semantic_entries(sample, context) do
+    case selected_entries_from_metadata(context.component_metadata) do
+      [] ->
+        [sample]
+
+      entries ->
+        sample_source = sample["source_name"]
+
+        [
+          Enum.find(entries, &(Map.get(&1, "source_name") == sample_source)) ||
+            sample
+        ]
+    end
+  end
+
+  defp selected_entries_from_metadata(nil), do: []
+
+  defp selected_entries_from_metadata(metadata) when is_map(metadata) do
+    case Map.get(metadata, "selected_tensors") do
+      entries when is_list(entries) -> entries
+      _ -> []
+    end
+  end
+
+  defp sample_contract_for_entry(entry, fallback_sample) do
+    source_shape =
+      Map.get(entry, "source_shape") ||
+        Map.get(entry, "shape") ||
+        Map.get(fallback_sample, "source_shape")
+
+    final_shape =
+      Map.get(entry, "sample_reconstructed_shape") ||
+        Map.get(entry, "stage_final_shape") ||
+        source_shape ||
+        Map.get(fallback_sample, "sample_reconstructed_shape")
+
+    %{
+      "source_name" => Map.get(entry, "source_name", fallback_sample["source_name"]),
+      "elixir_name" => Map.get(entry, "elixir_name", fallback_sample["elixir_name"]),
+      "offset_start" => Map.get(entry, "offset_start", fallback_sample["offset_start"]),
+      "offset_end" => Map.get(entry, "offset_end", fallback_sample["offset_end"]),
+      "source_shape" => source_shape,
+      "sample_reconstructed_shape" => final_shape,
+      "sample_reconstructed_bf16_sha256" =>
+        Map.get(entry, "sample_reconstructed_bf16_sha256") ||
+          if(Map.get(entry, "source_name") == fallback_sample["source_name"],
+            do: fallback_sample["sample_reconstructed_bf16_sha256"],
+            else: nil
+          )
+    }
+  end
+
+  defp entry_safe_key(entry),
+    do: Map.get(entry, "safe_key") || sanitize_python_key(entry["source_name"])
+
+  defp component_keys(entry, safe_key) do
+    component_tensors = Map.get(entry, "component_tensors", %{})
+
+    %{
+      u: Map.get(component_tensors, "u", "svd.U.#{safe_key}"),
+      s: Map.get(component_tensors, "s", "svd.S.#{safe_key}"),
+      v: Map.get(component_tensors, "v", "svd.V.#{safe_key}"),
+      offsets: Map.get(entry, "scale_tensor", "svf.scale_offsets.#{safe_key}")
+    }
+  end
+
+  defp stage_context_for_entry(entry, safe_key, sample_source_host, context) do
+    python_tensors =
+      if context.all_selected_tensors? do
+        python_stage_tensors_for_entry!(entry, context.python_all_selected_stage_tensors)
+      else
+        context.python_stage_tensors
+      end
+
+    source_tensor =
+      cond do
+        is_map(python_tensors) and
+            match?(%Nx.Tensor{}, Map.get(python_tensors, "stage.source_f32")) ->
+          Map.fetch!(python_tensors, "stage.source_f32")
+
+        context.all_selected_tensors? ->
+          raise ArgumentError,
+                "all-selected semantic replay requires Python stage.source_f32 for #{entry["source_name"]}"
+
+        true ->
+          sample_source_host
+      end
+
+    %{
+      python_tensors: python_tensors,
+      dir: context.stage_dir,
+      file_slug: if(context.all_selected_tensors?, do: safe_key, else: nil),
+      source_name: entry["source_name"],
+      elixir_name: entry["elixir_name"],
+      safe_key: safe_key,
+      offset_start: entry["offset_start"],
+      offset_end: entry["offset_end"],
+      source_tensor: source_tensor
+    }
+  end
+
+  defp python_stage_tensors_for_entry!(_entry, nil) do
+    raise ArgumentError, "all-selected semantic replay requires Python all-selected stage tensors"
+  end
+
+  defp python_stage_tensors_for_entry!(entry, python_stage_tensors)
+       when is_map(python_stage_tensors) do
+    stage_map = Map.get(entry, "stage_tensors", %{})
+    source_name = Map.fetch!(entry, "source_name")
+
+    @stage_names
+    |> Map.new(fn stage_name ->
+      full_key = Map.get(stage_map, stage_name, tensor_stage_key(source_name, stage_name))
+      tensor = fetch_tensor!(python_stage_tensors, full_key)
+      {"stage.#{stage_name}", tensor}
+    end)
   end
 
   defp safe_semantic_variant(
@@ -348,10 +513,13 @@ defmodule TrinityCoordinator.Sakana.ParityTrace do
   rescue
     e ->
       %{
-        "label" => semantic_label(layout, compute_target),
+        "label" => semantic_variant_label(layout, compute_target, stage_context),
         "svd_provider" => "python_components_safetensors",
         "compute_backend" => compute_target.label,
         "v_layout" => Atom.to_string(layout),
+        "source_name" => Map.get(stage_context, :source_name),
+        "elixir_name" => Map.get(stage_context, :elixir_name),
+        "safe_key" => Map.get(stage_context, :safe_key),
         "error" => Exception.message(e),
         "error_stacktrace" => Exception.format(:error, e, __STACKTRACE__),
         "matches_expected" => false
@@ -422,7 +590,13 @@ defmodule TrinityCoordinator.Sakana.ParityTrace do
         stage_checks = compare_stage_tensors(stage_tensors, stage_context.python_tensors)
 
         stage_file =
-          maybe_write_stage_tensors(stage_context.dir, compute_target, layout, stage_tensors)
+          maybe_write_stage_tensors(
+            stage_context.dir,
+            compute_target,
+            layout,
+            stage_tensors,
+            Map.get(stage_context, :file_slug)
+          )
 
         {stage_tensors, stage_file, stage_checks}
       else
@@ -430,10 +604,15 @@ defmodule TrinityCoordinator.Sakana.ParityTrace do
       end
 
     %{
-      "label" => semantic_label(layout, compute_target),
+      "label" => semantic_variant_label(layout, compute_target, stage_context),
       "svd_provider" => "python_components_safetensors",
       "compute_backend" => compute_target.label,
       "v_layout" => Atom.to_string(layout),
+      "source_name" => Map.get(stage_context, :source_name, sample["source_name"]),
+      "elixir_name" => Map.get(stage_context, :elixir_name, sample["elixir_name"]),
+      "safe_key" => Map.get(stage_context, :safe_key),
+      "offset_start" => Map.get(stage_context, :offset_start, sample["offset_start"]),
+      "offset_end" => Map.get(stage_context, :offset_end, sample["offset_end"]),
       "u" => tensor_summary(u_host, prefix_count: 4, include_alt_hashes: false),
       "s" => singular_summary(s_host, typed_offsets_host),
       "v" => tensor_summary(v_host, prefix_count: 4, include_alt_hashes: false),
@@ -445,13 +624,15 @@ defmodule TrinityCoordinator.Sakana.ParityTrace do
       "stage_debug" => %{
         "schema" => "trinity_sakana_elixir_stage_debug.v1",
         "stage_tensor_file" => stage_file,
+        "source_name" => Map.get(stage_context, :source_name, sample["source_name"]),
+        "elixir_name" => Map.get(stage_context, :elixir_name, sample["elixir_name"]),
         "compared_to_python_stage_tensors" => not is_nil(stage_context.python_tensors),
         "functional_parity_passed" => stage_checks_passed?(stage_checks),
         "checks" => stage_checks
       },
       "observed_bf16_sha256" => observed,
       "expected_bf16_sha256" => expected,
-      "matches_expected" => observed == expected
+      "matches_expected" => is_binary(expected) and observed == expected
     }
   end
 
@@ -506,12 +687,20 @@ defmodule TrinityCoordinator.Sakana.ParityTrace do
     }
   end
 
-  defp maybe_write_stage_tensors(nil, _compute_target, _layout, _stage_tensors), do: nil
-  defp maybe_write_stage_tensors("", _compute_target, _layout, _stage_tensors), do: nil
+  defp maybe_write_stage_tensors(nil, _compute_target, _layout, _stage_tensors, _slug), do: nil
+  defp maybe_write_stage_tensors("", _compute_target, _layout, _stage_tensors, _slug), do: nil
 
-  defp maybe_write_stage_tensors(stage_dir, compute_target, layout, stage_tensors) do
+  defp maybe_write_stage_tensors(stage_dir, compute_target, layout, stage_tensors, slug) do
     File.mkdir_p!(stage_dir)
-    file = "trinity_svf_elixir_stage_#{compute_target.label}_#{layout}.safetensors"
+
+    suffix =
+      case slug do
+        nil -> ""
+        "" -> ""
+        value -> "_#{value}"
+      end
+
+    file = "trinity_svf_elixir_stage_#{compute_target.label}_#{layout}#{suffix}.safetensors"
     path = Path.join(stage_dir, file)
 
     payload =
@@ -724,11 +913,16 @@ defmodule TrinityCoordinator.Sakana.ParityTrace do
     end
   end
 
-  defp python_stage_file(nil), do: nil
+  defp python_stage_file(nil, _kind), do: nil
 
-  defp python_stage_file(report) when is_map(report) do
+  defp python_stage_file(report, :sample) when is_map(report) do
     get_in(report, ["stage_debug", "stage_tensor_file"]) ||
       get_in(report, ["inputs", "stage_tensor_file"])
+  end
+
+  defp python_stage_file(report, :all_selected) when is_map(report) do
+    get_in(report, ["stage_debug", "all_selected_stage_tensor_file"]) ||
+      get_in(report, ["inputs", "all_selected_stage_tensor_file"])
   end
 
   defp maybe_read_safetensors(nil), do: nil
@@ -773,6 +967,16 @@ defmodule TrinityCoordinator.Sakana.ParityTrace do
 
   defp semantic_label(layout, compute_target) do
     "semantic_python_components_#{compute_target.label}_v_layout_#{layout}"
+  end
+
+  defp semantic_variant_label(layout, compute_target, stage_context) do
+    base = semantic_label(layout, compute_target)
+
+    case Map.get(stage_context, :file_slug) do
+      nil -> base
+      "" -> base
+      slug -> "#{base}_tensor_#{slug}"
+    end
   end
 
   defp backend_label_slug(backend) do
@@ -999,6 +1203,10 @@ defmodule TrinityCoordinator.Sakana.ParityTrace do
     source_name
     |> String.replace("/", "__")
     |> String.replace(~r/[^0-9A-Za-z_.-]/, "__")
+  end
+
+  defp tensor_stage_key(source_name, stage_name) do
+    "tensor.#{sanitize_python_key(source_name)}.#{stage_name}"
   end
 
   defp host_snapshot(%Nx.Tensor{} = tensor), do: Nx.backend_transfer(tensor, Nx.BinaryBackend)

@@ -67,6 +67,13 @@ The final `bf16` stage still reports max and mean differences. It is not the
 functional gate because small f32 reconstruction differences can round to
 different `bf16` bytes.
 
+In sample mode, stage tensor keys use the `stage.*` names directly. In
+all-selected Python bundles, keys are namespaced as
+`tensor.<safe_source_name>.<stage>`. The Elixir all-selected replay maps those
+namespaced tensors back to the same `stage.*` contract per selected tensor, so
+the comparator can apply one tolerance table consistently while still reporting
+the failing `source_name`.
+
 ## Current Observed Result
 
 In the current environment:

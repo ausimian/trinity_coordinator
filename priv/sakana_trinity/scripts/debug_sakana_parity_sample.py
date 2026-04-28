@@ -42,6 +42,19 @@ DEFAULT_ROUTER_VECTOR_NPY = Path("priv/sakana_trinity/artifacts/sakana_model_ite
 DEFAULT_OUT = Path("tmp/sakana_parity/python_sample_trace.json")
 DEFAULT_COMPONENT_DIR = Path("tmp/sakana_parity/python_components")
 STAGE_FILE = "trinity_svf_stage_debug.safetensors"
+ALL_SELECTED_STAGE_FILE = "trinity_svf_all_selected_stage_debug.safetensors"
+STAGE_NAMES = [
+    "source_f32",
+    "offsets_f32",
+    "scaled_s",
+    "normalization",
+    "u_scaled",
+    "matmul_pre_norm",
+    "zero_source_f32",
+    "adapted_source_f32",
+    "final_f32",
+    "final_bf16",
+]
 
 
 def parse_args() -> argparse.Namespace:
@@ -150,6 +163,29 @@ def orient_to_shape(tensor: torch.Tensor, shape: list[int], label: str) -> torch
 
 def sanitize_key(key: str) -> str:
     return "".join(ch if (ch.isalnum() or ch in "_.-") else "__" for ch in key.replace("/", "__"))
+
+
+def tensor_stage_key(source_name: str, stage: str) -> str:
+    return f"tensor.{sanitize_key(source_name)}.{stage}"
+
+
+def source_oriented_stage_sample(entry: dict[str, Any]) -> dict[str, Any]:
+    """Build the shape contract for all-selected source-oriented stage checks.
+
+    The manifest sample has a known target orientation, but the selected-tensor
+    list only records Python source shapes. Full target-orientation validation
+    belongs to canonical artifact import/profile loading, so all-selected stage
+    parity keeps final stages source-oriented.
+    """
+    shape = entry.get("shape") or entry.get("source_shape")
+    if not isinstance(shape, list):
+        raise KeyError(f"selected entry has no shape/source_shape: {entry}")
+    return {
+        "source_name": entry["source_name"],
+        "elixir_name": entry.get("elixir_name"),
+        "sample_reconstructed_shape": shape,
+        "sample_reconstructed_bf16_sha256": "",
+    }
 
 
 def load_router_vector(path: Path, dtype: str) -> np.ndarray:
@@ -506,9 +542,16 @@ def build_selected_component_bundle(
     vector: np.ndarray,
     svd_weights: Optional[dict[str, torch.Tensor]],
     device: str,
-) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor], list[dict[str, Any]], str]:
+) -> tuple[
+    dict[str, torch.Tensor],
+    dict[str, torch.Tensor],
+    list[dict[str, Any]],
+    dict[str, torch.Tensor],
+    str,
+]:
     components: dict[str, torch.Tensor] = {}
     scales: dict[str, torch.Tensor] = {}
+    stage_payload: dict[str, torch.Tensor] = {}
     metadata_entries: list[dict[str, Any]] = []
     component_sources: set[str] = set()
 
@@ -536,6 +579,23 @@ def build_selected_component_bundle(
         components[component_keys["v"]] = entry_components["v"]
         scales[scale_key] = offsets
 
+        stage_sample = source_oriented_stage_sample(entry)
+        stage_tensors = torch_v_stage_tensors(
+            entry_components["u"].to(torch.float32),
+            entry_components["s"].to(torch.float32),
+            entry_components["v"].to(torch.float32),
+            offsets.to(torch.float32),
+            source_f32,
+            stage_sample,
+        )
+        stage_keys: dict[str, str] = {}
+
+        for stage_key, tensor in stage_tensors.items():
+            stage_name = stage_key.removeprefix("stage.")
+            selected_stage_key = tensor_stage_key(source_name, stage_name)
+            stage_payload[selected_stage_key] = tensor
+            stage_keys[stage_name] = selected_stage_key
+
         metadata_entries.append(
             {
                 "index": index,
@@ -554,13 +614,16 @@ def build_selected_component_bundle(
                 "offset_start": int(entry["offset_start"]),
                 "offset_end": int(entry["offset_end"]),
                 "singular_values": int(entry.get("singular_values", offsets.numel())),
+                "stage_final_orientation": "source",
+                "stage_final_shape": list(source_f32.shape),
+                "stage_tensors": stage_keys,
                 "source_sha256_as_f32": tensor_sha256(source_f32),
                 "offsets_sha256": tensor_sha256(offsets),
             }
         )
 
     component_source_label = next(iter(component_sources)) if len(component_sources) == 1 else "mixed"
-    return components, scales, metadata_entries, component_source_label
+    return components, scales, metadata_entries, stage_payload, component_source_label
 
 
 def load_component_bundle(
@@ -695,6 +758,13 @@ def write_stage_bundle(out_dir: Path, stage_tensors: dict[str, torch.Tensor]) ->
     return path
 
 
+def write_all_selected_stage_bundle(out_dir: Path, stage_tensors: dict[str, torch.Tensor]) -> Path:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / ALL_SELECTED_STAGE_FILE
+    save_file({key: value.detach().cpu().contiguous() for key, value in stage_tensors.items()}, str(path))
+    return path
+
+
 def main() -> None:
     args = parse_args()
     if args.all_selected_tensors and args.svd_weights is None and not args.decompose_all_selected_if_missing:
@@ -733,6 +803,8 @@ def main() -> None:
     component_readback_summary = None
     stage_tensors: dict[str, torch.Tensor] = {}
     stage_path: Path | None = None
+    all_selected_stage_tensors: dict[str, torch.Tensor] = {}
+    all_selected_stage_path: Path | None = None
     selected_component_entries: list[dict[str, Any]] = []
 
     in_memory_baseline = select_baseline_variant(variants, expected, component_source)
@@ -752,7 +824,13 @@ def main() -> None:
         if args.all_selected_tensors:
             entries = selected_tensor_entries(reference, sample, include_all=True)
 
-            component_payload, scale_payload, selected_component_entries, component_source_written = (
+            (
+                component_payload,
+                scale_payload,
+                selected_component_entries,
+                all_selected_stage_tensors,
+                component_source_written,
+            ) = (
                 build_selected_component_bundle(
                     entries,
                     state_dict,
@@ -802,6 +880,12 @@ def main() -> None:
         if not args.no_write_stage_tensors:
             stage_path = write_stage_bundle(readback_dir, stage_tensors)
 
+            if args.all_selected_tensors and all_selected_stage_tensors:
+                all_selected_stage_path = write_all_selected_stage_bundle(
+                    readback_dir,
+                    all_selected_stage_tensors,
+                )
+
     baseline = select_baseline_variant(variants, expected, component_source)
     reference_hash_reproducible = any(v["matches_expected"] for v in variants)
 
@@ -836,6 +920,9 @@ def main() -> None:
             "all_selected_tensors_written": bool(args.all_selected_tensors and not args.no_write_components),
             "readback_components_dir": None if readback_dir is None else str(readback_dir),
             "stage_tensor_file": None if stage_path is None else str(stage_path),
+            "all_selected_stage_tensor_file": (
+                None if all_selected_stage_path is None else str(all_selected_stage_path)
+            ),
         },
         "source_tensor": tensor_summary(source, 16),
         "source_tensor_f32_svd_input": tensor_summary(source_f32, 16),
@@ -843,11 +930,29 @@ def main() -> None:
         "component_bundle_before_write": component_bundle_summary(component_bundle, offsets),
         "component_bundle_readback": component_readback_summary,
         "selected_tensor_components": selected_component_entries,
+        "selected_tensor_stage_debug": [
+            {
+                "index": entry["index"],
+                "source_name": entry["source_name"],
+                "elixir_name": entry.get("elixir_name"),
+                "safe_key": entry["safe_key"],
+                "offset_start": entry["offset_start"],
+                "offset_end": entry["offset_end"],
+                "stage_final_orientation": entry.get("stage_final_orientation"),
+                "stage_final_shape": entry.get("stage_final_shape"),
+                "stage_tensors": entry.get("stage_tensors", {}),
+            }
+            for entry in selected_component_entries
+        ],
         "stage_debug": {
             "schema": "trinity_sakana_stage_debug.v1",
             "baseline_label": "python_safetensors_readback_torch_v_final_bf16",
             "stage_tensor_file": None if stage_path is None else str(stage_path),
+            "all_selected_stage_tensor_file": (
+                None if all_selected_stage_path is None else str(all_selected_stage_path)
+            ),
             "stage_keys": sorted(stage_tensors.keys()),
+            "all_selected_stage_keys": sorted(all_selected_stage_tensors.keys()),
             "interpretation": (
                 "These tensors are emitted from Python safetensors readback. "
                 "Use them as the stage-by-stage baseline for Elixir semantic parity. "
@@ -872,6 +977,9 @@ def main() -> None:
     if stage_path is not None:
         print(f"wrote Python stage tensor bundle: {stage_path}")
         print("stage baseline: Python safetensors readback; compare with --strict-stage-tolerances")
+    if all_selected_stage_path is not None:
+        print(f"wrote all-selected Python stage tensor bundle: {all_selected_stage_path}")
+        print("all-selected stage baseline: source-oriented per selected tensor")
     print(f"stored_reference_bf16_sha256: {expected}")
     print(f"reference_hash_reproducible: {reference_hash_reproducible}")
     print(f"current_python_baseline: {baseline['label']} {baseline['observed_bf16_sha256']}")
