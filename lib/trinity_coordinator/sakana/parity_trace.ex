@@ -9,6 +9,13 @@ defmodule TrinityCoordinator.Sakana.ParityTrace do
   compact JSON report so the native path, imported Python-component path, dtype
   choices, orientation choices, and final tensor bytes can be compared side by
   side.
+
+  EXLA may donate or delete device buffers after compiled linear-algebra calls.
+  This tracer therefore snapshots tensors needed for diagnostics to
+  `Nx.BinaryBackend` before using those tensors in later dot/SVD computations.
+  Expensive reconstructions receive fresh device copies from those snapshots so
+  report generation can inspect intermediate values without tripping donated
+  buffer reads.
   """
 
   alias TrinityCoordinator.{Runtime, SLMProfile}
@@ -39,6 +46,8 @@ defmodule TrinityCoordinator.Sakana.ParityTrace do
       Runtime.put_cuda_backend!()
     end
 
+    compute_backend = if opts[:require_cuda], do: {EXLA.Backend, client: :cuda}, else: nil
+
     reference = load_json!(opts[:reference_manifest_path])
     sample = Map.fetch!(reference, "sample_adapted_tensor")
 
@@ -50,14 +59,27 @@ defmodule TrinityCoordinator.Sakana.ParityTrace do
     split = SVD.split_router_vector(vector, @scale_count, @hidden_size, @output_count)
     offsets = sample_offsets(split.scale_offsets, sample)
 
-    source_tensor = orient_to_shape!(sample_entry.tensor, sample["source_shape"], sample["elixir_name"])
+    source_tensor =
+      orient_to_shape!(sample_entry.tensor, sample["source_shape"], sample["elixir_name"])
 
-    native_variants = native_variants(source_tensor, offsets, sample)
-    semantic = maybe_semantic_component_report(opts[:components_dir], source_tensor, sample)
+    # Snapshot before native variants run. SVD/reconstruction can donate device
+    # buffers, so every later variant receives fresh device tensors from these
+    # immutable host copies.
+    vector_host = host_snapshot(vector)
+    offsets_host = host_snapshot(offsets)
+    source_host = host_snapshot(source_tensor)
+    sample_entry_backend = Runtime.tensor_backend(sample_entry.tensor)
+    source_backend = Runtime.tensor_backend(source_tensor)
+
+    native_variants = native_variants(source_host, offsets_host, sample, compute_backend)
+
+    semantic =
+      maybe_semantic_component_report(opts[:components_dir], source_host, sample, compute_backend)
 
     %{
-      "schema" => "trinity_sakana_svd_parity_trace.v1",
-      "generated_at_utc" => DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601(),
+      "schema" => "trinity_sakana_svd_parity_trace.v2",
+      "generated_at_utc" =>
+        DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601(),
       "paths" => %{
         "router_vector" => opts[:router_vector_path],
         "reference_manifest" => opts[:reference_manifest_path],
@@ -78,13 +100,17 @@ defmodule TrinityCoordinator.Sakana.ParityTrace do
         "selected_tensor_count" => length(selected),
         "selected_singular_value_count" => SVD.singular_value_count(selected),
         "sample_elixir_shape" => shape_list(sample_entry.tensor),
-        "sample_source_oriented_shape" => shape_list(source_tensor),
+        "sample_source_oriented_shape" => shape_list(source_host),
         "sample_source_type" => inspect(Nx.type(sample_entry.tensor)),
-        "sample_source_backend" => Runtime.tensor_backend(sample_entry.tensor)
+        "sample_source_backend" => sample_entry_backend,
+        "sample_source_oriented_backend" => source_backend,
+        "diagnostic_snapshots_backend" => Runtime.tensor_backend(source_host),
+        "compute_backend" => inspect(compute_backend || Nx.BinaryBackend)
       },
-      "router_vector" => tensor_summary(vector, prefix_count: 8),
-      "scale_offsets" => tensor_summary(offsets, prefix_count: 16),
-      "source_tensor" => tensor_summary(source_tensor, prefix_count: 16),
+      "router_vector" => tensor_summary(vector_host, prefix_count: 8),
+      "scale_offsets" => tensor_summary(offsets_host, prefix_count: 16),
+      "source_tensor" =>
+        tensor_summary(source_host, prefix_count: 16, backend_label: source_backend),
       "native_elixir_svd_variants" => native_variants,
       "semantic_python_component_variants" => semantic
     }
@@ -98,23 +124,69 @@ defmodule TrinityCoordinator.Sakana.ParityTrace do
     :ok
   end
 
-  defp native_variants(source_tensor, offsets, sample) do
+  defp native_variants(source_host, offsets_host, sample, compute_backend) do
     [
-      %{label: "native_nx_f32_svd_offsets_singular_final_bf16", compute_type: :f32, offset_type: :singular},
-      %{label: "native_nx_source_svd_offsets_singular_final_bf16", compute_type: :source, offset_type: :singular},
+      %{
+        label: "native_nx_f32_svd_offsets_singular_final_bf16",
+        compute_type: :f32,
+        offset_type: :singular
+      },
+      %{
+        label: "native_nx_source_svd_offsets_singular_final_bf16",
+        compute_type: :source,
+        offset_type: :singular
+      },
       %{label: "native_nx_f32_svd_offsets_f32_final_bf16", compute_type: :f32, offset_type: :f32},
-      %{label: "native_nx_f32_svd_offsets_source_final_bf16", compute_type: :f32, offset_type: :source}
+      %{
+        label: "native_nx_f32_svd_offsets_source_final_bf16",
+        compute_type: :f32,
+        offset_type: :source
+      }
     ]
-    |> Enum.map(fn config -> native_variant(source_tensor, offsets, sample, config) end)
+    |> Enum.map(fn config ->
+      native_variant(source_host, offsets_host, sample, config, compute_backend)
+    end)
   end
 
-  defp native_variant(source_tensor, offsets, sample, config) do
-    decomp = SVD.decompose_tensor(source_tensor, compute_type: config.compute_type)
-    typed_offsets = cast_offsets(offsets, config.offset_type, source_tensor, decomp)
-    zero_offsets = Nx.broadcast(0.0, Nx.shape(decomp.s)) |> Nx.as_type(Nx.type(decomp.s))
-    zero_reconstruct = SVD.reconstruct(decomp, zero_offsets)
-    sample_reconstruct = SVD.reconstruct(decomp, typed_offsets) |> Nx.as_type(:bf16)
-    final = orient_to_shape!(sample_reconstruct, sample["sample_reconstructed_shape"], config.label)
+  defp native_variant(source_host, offsets_host, sample, config, compute_backend) do
+    source_device = device_copy(source_host, compute_backend)
+    decomp = SVD.decompose_tensor(source_device, compute_type: config.compute_type)
+
+    # Capture labels and host snapshots before any later reconstruction can
+    # consume/donate the EXLA device buffers.
+    u_backend = Runtime.tensor_backend(decomp.u)
+    s_backend = Runtime.tensor_backend(decomp.s)
+    v_backend = Runtime.tensor_backend(decomp.v)
+    u_host = host_snapshot(decomp.u)
+    s_host = host_snapshot(decomp.s)
+    v_host = host_snapshot(decomp.v)
+
+    typed_offsets_host =
+      cast_offsets(offsets_host, config.offset_type, source_host, %{s: s_host}) |> host_snapshot()
+
+    zero_offsets_host =
+      Nx.broadcast(0.0, Nx.shape(s_host)) |> Nx.as_type(Nx.type(s_host)) |> host_snapshot()
+
+    svd_source_host = svd_source_tensor(source_host, config.compute_type) |> host_snapshot()
+
+    zero_reconstruct_host =
+      %{u: u_host, s: s_host, v: v_host}
+      |> reconstruct_on_backend(zero_offsets_host, compute_backend)
+      |> host_snapshot()
+
+    sample_reconstruct_host =
+      %{u: u_host, s: s_host, v: v_host}
+      |> reconstruct_on_backend(typed_offsets_host, compute_backend)
+      |> Nx.as_type(:bf16)
+      |> host_snapshot()
+
+    final =
+      orient_to_shape!(
+        sample_reconstruct_host,
+        sample["sample_reconstructed_shape"],
+        config.label
+      )
+
     expected = sample["sample_reconstructed_bf16_sha256"]
     observed = Artifact.tensor_sha256(final)
 
@@ -123,10 +195,22 @@ defmodule TrinityCoordinator.Sakana.ParityTrace do
       "svd_provider" => "elixir_nx",
       "compute_type" => Atom.to_string(config.compute_type),
       "offset_type" => Atom.to_string(config.offset_type),
-      "u" => tensor_summary(decomp.u, prefix_count: 4, include_alt_hashes: false),
-      "s" => singular_summary(decomp.s, typed_offsets),
-      "v" => tensor_summary(decomp.v, prefix_count: 4, include_alt_hashes: false),
-      "zero_offset_max_abs_error_vs_source" => max_abs_error(zero_reconstruct, svd_source_tensor(source_tensor, config.compute_type)),
+      "u" =>
+        tensor_summary(u_host,
+          prefix_count: 4,
+          include_alt_hashes: false,
+          backend_label: u_backend
+        ),
+      "s" => singular_summary(s_host, typed_offsets_host),
+      "v" =>
+        tensor_summary(v_host,
+          prefix_count: 4,
+          include_alt_hashes: false,
+          backend_label: v_backend
+        ),
+      "component_backends" => %{"u" => u_backend, "s" => s_backend, "v" => v_backend},
+      "zero_offset_max_abs_error_vs_source" =>
+        max_abs_error(zero_reconstruct_host, svd_source_host),
       "final" => tensor_summary(final, prefix_count: 16),
       "observed_bf16_sha256" => observed,
       "expected_bf16_sha256" => expected,
@@ -134,10 +218,10 @@ defmodule TrinityCoordinator.Sakana.ParityTrace do
     }
   end
 
-  defp maybe_semantic_component_report(nil, _source_tensor, _sample), do: nil
-  defp maybe_semantic_component_report("", _source_tensor, _sample), do: nil
+  defp maybe_semantic_component_report(nil, _source_host, _sample, _compute_backend), do: nil
+  defp maybe_semantic_component_report("", _source_host, _sample, _compute_backend), do: nil
 
-  defp maybe_semantic_component_report(components_dir, source_tensor, sample) do
+  defp maybe_semantic_component_report(components_dir, source_host, sample, compute_backend) do
     component_path = Path.join(components_dir, @component_file)
     scale_path = Path.join(components_dir, @scale_file)
 
@@ -145,13 +229,15 @@ defmodule TrinityCoordinator.Sakana.ParityTrace do
       components = Safetensors.read!(component_path)
       scales = Safetensors.read!(scale_path)
       safe_key = sanitize_python_key(sample["source_name"])
-      u = fetch_tensor!(components, "svd.U.#{safe_key}")
-      s = fetch_tensor!(components, "svd.S.#{safe_key}")
-      v = fetch_tensor!(components, "svd.V.#{safe_key}")
-      offsets = fetch_tensor!(scales, "svf.scale_offsets.#{safe_key}")
+      u = fetch_tensor!(components, "svd.U.#{safe_key}") |> host_snapshot()
+      s = fetch_tensor!(components, "svd.S.#{safe_key}") |> host_snapshot()
+      v = fetch_tensor!(components, "svd.V.#{safe_key}") |> host_snapshot()
+      offsets = fetch_tensor!(scales, "svf.scale_offsets.#{safe_key}") |> host_snapshot()
 
       [:nx, :torch_v]
-      |> Enum.map(fn layout -> safe_semantic_variant(layout, u, s, v, offsets, source_tensor, sample) end)
+      |> Enum.map(fn layout ->
+        safe_semantic_variant(layout, u, s, v, offsets, source_host, sample, compute_backend)
+      end)
     else
       %{
         "error" => "missing_semantic_component_files",
@@ -161,8 +247,8 @@ defmodule TrinityCoordinator.Sakana.ParityTrace do
     end
   end
 
-  defp safe_semantic_variant(layout, u, s, v, offsets, source_tensor, sample) do
-    semantic_variant(layout, u, s, v, offsets, source_tensor, sample)
+  defp safe_semantic_variant(layout, u, s, v, offsets, source_host, sample, compute_backend) do
+    semantic_variant(layout, u, s, v, offsets, source_host, sample, compute_backend)
   rescue
     e ->
       %{
@@ -174,13 +260,39 @@ defmodule TrinityCoordinator.Sakana.ParityTrace do
       }
   end
 
-  defp semantic_variant(layout, u, s, v, offsets, source_tensor, sample) do
-    decomp = %{u: u, s: s, v: v}
-    typed_offsets = Nx.as_type(offsets, Nx.type(s))
-    zero_offsets = Nx.broadcast(0.0, Nx.shape(s)) |> Nx.as_type(Nx.type(s))
-    zero_reconstruct = SVD.reconstruct(decomp, zero_offsets, v_layout: layout)
-    sample_reconstruct = SVD.reconstruct(decomp, typed_offsets, v_layout: layout) |> Nx.as_type(:bf16)
-    final = orient_to_shape!(sample_reconstruct, sample["sample_reconstructed_shape"], "semantic_#{layout}")
+  defp semantic_variant(
+         layout,
+         u_host,
+         s_host,
+         v_host,
+         offsets_host,
+         source_host,
+         sample,
+         compute_backend
+       ) do
+    typed_offsets_host = Nx.as_type(offsets_host, Nx.type(s_host)) |> host_snapshot()
+
+    zero_offsets_host =
+      Nx.broadcast(0.0, Nx.shape(s_host)) |> Nx.as_type(Nx.type(s_host)) |> host_snapshot()
+
+    zero_reconstruct_host =
+      %{u: u_host, s: s_host, v: v_host}
+      |> reconstruct_on_backend(zero_offsets_host, compute_backend, v_layout: layout)
+      |> host_snapshot()
+
+    sample_reconstruct_host =
+      %{u: u_host, s: s_host, v: v_host}
+      |> reconstruct_on_backend(typed_offsets_host, compute_backend, v_layout: layout)
+      |> Nx.as_type(:bf16)
+      |> host_snapshot()
+
+    final =
+      orient_to_shape!(
+        sample_reconstruct_host,
+        sample["sample_reconstructed_shape"],
+        "semantic_#{layout}"
+      )
+
     expected = sample["sample_reconstructed_bf16_sha256"]
     observed = Artifact.tensor_sha256(final)
 
@@ -188,11 +300,12 @@ defmodule TrinityCoordinator.Sakana.ParityTrace do
       "label" => "semantic_python_components_v_layout_#{layout}",
       "svd_provider" => "python_components_safetensors",
       "v_layout" => Atom.to_string(layout),
-      "u" => tensor_summary(u, prefix_count: 4, include_alt_hashes: false),
-      "s" => singular_summary(s, typed_offsets),
-      "v" => tensor_summary(v, prefix_count: 4, include_alt_hashes: false),
-      "offsets" => tensor_summary(offsets, prefix_count: 16),
-      "zero_offset_max_abs_error_vs_source" => max_abs_error(zero_reconstruct, Nx.as_type(source_tensor, :f32)),
+      "u" => tensor_summary(u_host, prefix_count: 4, include_alt_hashes: false),
+      "s" => singular_summary(s_host, typed_offsets_host),
+      "v" => tensor_summary(v_host, prefix_count: 4, include_alt_hashes: false),
+      "offsets" => tensor_summary(offsets_host, prefix_count: 16),
+      "zero_offset_max_abs_error_vs_source" =>
+        max_abs_error(zero_reconstruct_host, Nx.as_type(source_host, :f32)),
       "final" => tensor_summary(final, prefix_count: 16),
       "observed_bf16_sha256" => observed,
       "expected_bf16_sha256" => expected,
@@ -200,16 +313,31 @@ defmodule TrinityCoordinator.Sakana.ParityTrace do
     }
   end
 
-  defp singular_summary(s, offsets) do
-    scaled_s = Nx.multiply(s, Nx.add(Nx.as_type(offsets, Nx.type(s)), 1))
+  defp reconstruct_on_backend(decomp_host, offsets_host, compute_backend, opts \\ []) do
+    device_decomp = %{
+      u: device_copy(decomp_host.u, compute_backend),
+      s: device_copy(decomp_host.s, compute_backend),
+      v: device_copy(decomp_host.v, compute_backend)
+    }
+
+    device_offsets = device_copy(offsets_host, compute_backend)
+    SVD.reconstruct(device_decomp, device_offsets, opts)
+  end
+
+  defp singular_summary(s_host, offsets_host) do
+    offsets_host = Nx.as_type(offsets_host, Nx.type(s_host)) |> host_snapshot()
+    scaled_s = Nx.multiply(s_host, Nx.add(offsets_host, 1)) |> host_snapshot()
+
+    sum_s = Nx.sum(Nx.as_type(s_host, :f32)) |> host_snapshot()
+    sum_scaled_s = Nx.sum(Nx.as_type(scaled_s, :f32)) |> host_snapshot()
 
     %{
-      "singular_values" => tensor_summary(s, prefix_count: 16),
-      "typed_offsets" => tensor_summary(offsets, prefix_count: 16),
+      "singular_values" => tensor_summary(s_host, prefix_count: 16),
+      "typed_offsets" => tensor_summary(offsets_host, prefix_count: 16),
       "scaled_s" => tensor_summary(scaled_s, prefix_count: 16),
-      "sum_s" => scalar(Nx.sum(Nx.as_type(s, :f32))),
-      "sum_scaled_s" => scalar(Nx.sum(Nx.as_type(scaled_s, :f32))),
-      "normalization" => scalar(Nx.divide(Nx.sum(Nx.as_type(s, :f32)), Nx.sum(Nx.as_type(scaled_s, :f32))))
+      "sum_s" => scalar(sum_s),
+      "sum_scaled_s" => scalar(sum_scaled_s),
+      "normalization" => scalar(Nx.divide(sum_s, sum_scaled_s))
     }
   end
 
@@ -231,9 +359,13 @@ defmodule TrinityCoordinator.Sakana.ParityTrace do
     Nx.slice(scale_offsets, [offset_start], [singular_values])
   end
 
-  defp cast_offsets(offsets, :singular, _source_tensor, decomp), do: Nx.as_type(offsets, Nx.type(decomp.s))
+  defp cast_offsets(offsets, :singular, _source_tensor, decomp),
+    do: Nx.as_type(offsets, Nx.type(decomp.s))
+
   defp cast_offsets(offsets, :f32, _source_tensor, _decomp), do: Nx.as_type(offsets, :f32)
-  defp cast_offsets(offsets, :source, source_tensor, _decomp), do: Nx.as_type(offsets, Nx.type(source_tensor))
+
+  defp cast_offsets(offsets, :source, source_tensor, _decomp),
+    do: Nx.as_type(offsets, Nx.type(source_tensor))
 
   defp svd_source_tensor(tensor, :source), do: tensor
   defp svd_source_tensor(tensor, :f32), do: Nx.as_type(tensor, :f32)
@@ -246,7 +378,7 @@ defmodule TrinityCoordinator.Sakana.ParityTrace do
         tensor
 
       tuple_size(Nx.shape(tensor)) == 2 and Nx.shape(Nx.transpose(tensor)) == target ->
-        Nx.transpose(tensor)
+        Nx.transpose(tensor) |> host_snapshot()
 
       true ->
         raise ArgumentError,
@@ -262,19 +394,22 @@ defmodule TrinityCoordinator.Sakana.ParityTrace do
     |> Nx.subtract(right)
     |> Nx.abs()
     |> Nx.reduce_max()
+    |> host_snapshot()
     |> scalar()
   end
 
-  defp tensor_summary(tensor, opts \\ []) do
-    opts = Keyword.validate!(opts, prefix_count: 8, include_alt_hashes: true)
-    tensor_f32 = Nx.as_type(tensor, :f32)
+  defp tensor_summary(tensor, opts) do
+    opts = Keyword.validate!(opts, prefix_count: 8, include_alt_hashes: true, backend_label: nil)
+    tensor = host_snapshot(tensor)
+    tensor_f32 = Nx.as_type(tensor, :f32) |> host_snapshot()
     size = Nx.size(tensor)
     prefix_count = min(size, opts[:prefix_count])
 
     base = %{
       "shape" => shape_list(tensor),
       "type" => inspect(Nx.type(tensor)),
-      "backend" => Runtime.tensor_backend(tensor),
+      "backend" => opts[:backend_label] || Runtime.tensor_backend(tensor),
+      "snapshot_backend" => Runtime.tensor_backend(tensor),
       "size" => size,
       "sha256" => Artifact.tensor_sha256(tensor),
       "min" => scalar(Nx.reduce_min(tensor_f32)),
@@ -297,13 +432,15 @@ defmodule TrinityCoordinator.Sakana.ParityTrace do
 
   defp prefix_f32(tensor, count) do
     tensor
+    |> host_snapshot()
     |> Nx.as_type(:f32)
     |> Nx.reshape({Nx.size(tensor)})
     |> Nx.slice([0], [count])
+    |> host_snapshot()
     |> Nx.to_flat_list()
   end
 
-  defp scalar(tensor), do: tensor |> Nx.to_number() |> finite_float()
+  defp scalar(tensor), do: tensor |> host_snapshot() |> Nx.to_number() |> finite_float()
 
   defp finite_float(value) when is_float(value) do
     cond do
@@ -318,8 +455,12 @@ defmodule TrinityCoordinator.Sakana.ParityTrace do
 
   defp fetch_tensor!(map, key) do
     case Map.fetch(map, key) do
-      {:ok, %Nx.Tensor{} = tensor} -> tensor
-      _ -> raise ArgumentError, "missing tensor #{inspect(key)}; available keys: #{inspect(Map.keys(map))}"
+      {:ok, %Nx.Tensor{} = tensor} ->
+        tensor
+
+      _ ->
+        raise ArgumentError,
+              "missing tensor #{inspect(key)}; available keys: #{inspect(Map.keys(map))}"
     end
   end
 
@@ -328,6 +469,11 @@ defmodule TrinityCoordinator.Sakana.ParityTrace do
     |> String.replace("/", "__")
     |> String.replace(~r/[^0-9A-Za-z_.-]/, "__")
   end
+
+  defp host_snapshot(%Nx.Tensor{} = tensor), do: Nx.backend_transfer(tensor, Nx.BinaryBackend)
+
+  defp device_copy(%Nx.Tensor{} = tensor, nil), do: tensor
+  defp device_copy(%Nx.Tensor{} = tensor, backend), do: Nx.backend_transfer(tensor, backend)
 
   defp load_json!(path) do
     path

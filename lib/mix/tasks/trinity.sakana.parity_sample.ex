@@ -41,9 +41,17 @@ defmodule Mix.Tasks.Trinity.Sakana.ParitySample do
     report =
       ParityTrace.sample_report!(
         router_vector_path:
-          Keyword.get(opts, :router_vector, "priv/sakana_trinity/artifacts/trinity_router_es_vector.safetensors"),
+          Keyword.get(
+            opts,
+            :router_vector,
+            "priv/sakana_trinity/artifacts/trinity_router_es_vector.safetensors"
+          ),
         reference_manifest_path:
-          Keyword.get(opts, :reference, "priv/sakana_trinity/reference/sakana_python_reference_manifest.json"),
+          Keyword.get(
+            opts,
+            :reference,
+            "priv/sakana_trinity/reference/sakana_python_reference_manifest.json"
+          ),
         components_dir: Keyword.get(opts, :components_dir),
         require_cuda: not Keyword.get(opts, :no_cuda, false)
       )

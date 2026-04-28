@@ -450,7 +450,8 @@ defmodule TrinityCoordinator.Sakana.SVD do
   defp v_for_reconstruction!(%Nx.Tensor{} = v, :torch_v), do: Nx.transpose(v)
 
   defp v_for_reconstruction!(_v, other) do
-    raise ArgumentError, "unsupported SVD v_layout #{inspect(other)}; expected :nx, :vh, or :torch_v"
+    raise ArgumentError,
+          "unsupported SVD v_layout #{inspect(other)}; expected :nx, :vh, or :torch_v"
   end
 
   defp svd_tuple!(tensor, opts) do

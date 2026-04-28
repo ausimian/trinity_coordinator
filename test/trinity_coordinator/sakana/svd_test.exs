@@ -664,7 +664,8 @@ defmodule TrinityCoordinator.Sakana.SVDTest do
                parity_failure_message(report)
 
       strict_native_svd_hash?() ->
-        assert Enum.any?(native_variants, & &1["matches_expected"]), parity_failure_message(report)
+        assert Enum.any?(native_variants, & &1["matches_expected"]),
+               parity_failure_message(report)
 
       true ->
         unless Enum.any?(native_variants, & &1["matches_expected"]) do
@@ -815,7 +816,9 @@ defmodule TrinityCoordinator.Sakana.SVDTest do
   end
 
   defp python_components_dir_from_env do
-    path = System.get_env("TRINITY_PYTHON_COMPONENTS_DIR") || System.get_env("TRINITY_PYTHON_SVD_COMPONENTS")
+    path =
+      System.get_env("TRINITY_PYTHON_COMPONENTS_DIR") ||
+        System.get_env("TRINITY_PYTHON_SVD_COMPONENTS")
 
     cond do
       not is_binary(path) or path == "" -> nil

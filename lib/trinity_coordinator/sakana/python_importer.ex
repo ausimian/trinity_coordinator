@@ -439,8 +439,12 @@ defmodule TrinityCoordinator.Sakana.PythonImporter do
     end)
     |> Enum.reject(&(&1.zero_error == :infinity))
     |> case do
-      [] -> raise ArgumentError, "no Python V layout can reconstruct source shape #{inspect(Nx.shape(source_reference))}"
-      candidates -> Enum.min_by(candidates, & &1.zero_error)
+      [] ->
+        raise ArgumentError,
+              "no Python V layout can reconstruct source shape #{inspect(Nx.shape(source_reference))}"
+
+      candidates ->
+        Enum.min_by(candidates, & &1.zero_error)
     end
   end
 

@@ -47,7 +47,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-write-components", action="store_true")
     parser.add_argument("--device", default="cpu", choices=["cpu", "cuda"])
     parser.add_argument("--vector-dtype", default="float32", choices=["float32", "float64"])
-    parser.add_argument("--model-torch-dtype", default="auto", choices=["auto", "float32", "bfloat16"])
+    parser.add_argument("--model-torch-dtype", default="float32", choices=["auto", "float32", "bfloat16"],
+                        help="Model weight dtype for the parity SVD. The reference was generated from the default float32 Transformers load; auto may load bf16 and intentionally produce a different hash.")
     return parser.parse_args()
 
 
@@ -136,6 +137,21 @@ def load_router_vector(path: Path, dtype: str) -> np.ndarray:
     return vector.astype(np.float32 if dtype == "float32" else np.float64, copy=False)
 
 
+
+
+def load_model(model_name: str, dtype_arg: Any) -> torch.nn.Module:
+    """Load the model using the current Transformers dtype keyword.
+
+    Newer Transformers versions warn that ``torch_dtype`` is deprecated in favor
+    of ``dtype``. Keep a fallback for older installations so the debug script
+    works across the dependency lane.
+    """
+    try:
+        return AutoModelForCausalLM.from_pretrained(model_name, dtype=dtype_arg)
+    except TypeError:
+        return AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=dtype_arg)
+
+
 def reconstruct_from_torch_svd(u: torch.Tensor, s: torch.Tensor, v: torch.Tensor, offsets: torch.Tensor) -> tuple[torch.Tensor, dict[str, Any]]:
     offsets = offsets.to(dtype=s.dtype, device=s.device)
     scaled_s = s * (1.0 + offsets)
@@ -204,7 +220,7 @@ def main() -> None:
     else:
         dtype_arg = torch.bfloat16
 
-    model = AutoModelForCausalLM.from_pretrained(args.model_name, torch_dtype=dtype_arg)
+    model = load_model(args.model_name, dtype_arg)
     state_dict = model.state_dict()
     source_name = sample["source_name"]
     if source_name not in state_dict:
