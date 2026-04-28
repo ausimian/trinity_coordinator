@@ -90,6 +90,11 @@ large cleanup diff on top.
    - load router head;
    - prove hidden state `{1, 1024}`, logits `{1, 10}`, agent logits `{7}`, and
      role logits `{3}` on a fixed transcript.
+   - Status: complete against
+     `tmp/sakana_parity/adapted_artifacts_from_python` with
+     `mix trinity.hitl.adapted --artifact-dir ...`; the smoke proved the
+     checkpoint-directory artifact patches Qwen, loads the `{10, 1024}` router
+     head, and routes a fixed transcript on CUDA.
 4. Add fixed-transcript router trace parity:
    - compare tokenization, hidden extraction, head weights, logits, and argmax
      agent/role between Python and Elixir.
@@ -157,3 +162,30 @@ This makes the current state functionally correct under the declared standard,
 while exact final byte matching remains an open optimization/debug target.
 The stage-bundle report, not the final Elixir hash alone, is the correctness
 verdict.
+
+## Adapted Coordinator Status
+
+The canonical import artifact produced in Phase 2 is now loadable by the live
+adapted coordinator gate:
+
+```bash
+XLA_TARGET=cuda12 mix trinity.hitl.adapted \
+  --artifact-dir tmp/sakana_parity/adapted_artifacts_from_python
+```
+
+The latest run validated:
+
+- `status=complete`, `artifact_layout=checkpoint_directory`;
+- `selected_tensor_count=9`, `selected_singular_value_count=9216`;
+- selected Qwen tensor patch differs from base on CUDA;
+- extracted hidden vector shape `{1, 1024}`;
+- route logits shape `{1, 10}`;
+- agent logits shape `{7}`;
+- role logits shape `{3}`;
+- observed route `agent_id=4`, `role_id=2`, public role `Verifier`.
+
+This means the imported Python semantic bundle is operational as a local Qwen
+router. The remaining confidence gap before declaring the model fully ready to
+route production traffic is fixed-transcript Python/Elixir router trace parity:
+token ids, hidden extraction position, hidden vector, head weights, logits, and
+argmax ids must be compared side by side.

@@ -5,57 +5,111 @@ defmodule Mix.Tasks.Trinity.Hitl.Adapted do
 
       XLA_TARGET=cuda12 mix trinity.hitl.adapted
 
-  Requires a complete canonical artifact directory:
+  By default this uses the complete canonical artifact directory:
   `priv/sakana_trinity/adapted_qwen3_0_6b_layer26`.
+
+  To validate a freshly imported Python semantic bundle before promoting it to
+  `priv/`, pass:
+
+      XLA_TARGET=cuda12 mix trinity.hitl.adapted \
+        --artifact-dir tmp/sakana_parity/adapted_artifacts_from_python
   """
 
   use Mix.Task
 
   alias TrinityCoordinator.{HITL, Runtime, SLMProfile}
-  alias TrinityCoordinator.Sakana.{Coordinator, SVD}
+  alias TrinityCoordinator.Sakana.{Artifact, Coordinator, SVD}
 
   @shortdoc "HITL adapted-Qwen coordinator route check"
   @default_compare_path "decoder.blocks.26.self_attention.query.kernel"
+  @default_message "Select a TRINITY role for this reasoning task."
 
   @impl true
   def run(args) do
     Mix.Task.run("app.start")
 
-    {opts, rest, errors} = OptionParser.parse(args, strict: [compare_path: :string])
-    unless rest == [], do: Mix.raise("Unexpected arguments: #{inspect(rest)}")
-    unless errors == [], do: Mix.raise("Invalid options: #{inspect(errors)}")
-
-    compare_path = Keyword.get(opts, :compare_path, @default_compare_path)
+    opts = parse_args!(args)
 
     HITL.banner("TRINITY HITL ADAPTED COORDINATOR CHECK")
     Runtime.put_cuda_backend!()
 
     {:ok, {base_info, _base_tokenizer}} = SLMProfile.load_profile(:qwen_coordinator)
-    {:ok, coordinator} = Coordinator.load()
+    {:ok, coordinator} = Coordinator.load(artifact_dir: opts.artifact_dir)
 
     HITL.kv("Artifact dir", coordinator.artifact_dir)
     HITL.kv("Artifact status", coordinator.manifest["status"])
+    HITL.kv("Artifact layout", coordinator.manifest["artifact_layout"])
+    HITL.kv("Artifact export complete", coordinator.manifest["export_complete"])
     HITL.kv("Selected tensor count", coordinator.manifest["selected_tensor_count"])
+
+    HITL.kv(
+      "Selected singular value count",
+      coordinator.manifest["selected_singular_value_count"]
+    )
+
     HITL.kv("Hidden size", coordinator.hidden_size)
     HITL.kv("Num agents", coordinator.num_agents)
     HITL.kv("Num roles", coordinator.num_roles)
 
-    prove_tensor_patch!(base_info.params, coordinator.model_info.params, compare_path)
+    ensure_manifest_contract!(coordinator.manifest)
+    prove_tensor_patch!(base_info.params, coordinator.model_info.params, opts.compare_path)
 
     {:ok, routed} =
       Coordinator.route_messages(coordinator, [
-        %{"role" => "user", "content" => "Select a TRINITY role for this reasoning task."}
+        %{"role" => "user", "content" => opts.message}
       ])
 
     HITL.ensure_shape!(routed.extraction.vector_shape, {1, 1_024}, "adapted Qwen vector")
     HITL.ensure_cuda_tensor!(routed.extraction.vector, "adapted Qwen vector")
     HITL.ensure_shape!(routed.route.logits, {1, 10}, "adapted route logits")
     HITL.ensure_cuda_tensor!(routed.route.logits, "adapted route logits")
+    HITL.ensure_shape!(routed.route.agent_logits, {7}, "adapted agent logits")
+    HITL.ensure_cuda_tensor!(routed.route.agent_logits, "adapted agent logits")
+    HITL.ensure_shape!(routed.route.role_logits, {3}, "adapted role logits")
+    HITL.ensure_cuda_tensor!(routed.route.role_logits, "adapted role logits")
     HITL.kv("Agent id", routed.route.agent_id)
     HITL.kv("Role id", routed.route.role_id)
     HITL.kv("Role name", HITL.role_name(routed.route.role_id))
+    HITL.kv("Agent logits", HITL.short_logits(routed.route.agent_logits))
+    HITL.kv("Role logits", HITL.short_logits(routed.route.role_logits))
 
     HITL.pass("TRINITY HITL ADAPTED COORDINATOR CHECK")
+  end
+
+  @doc false
+  def parse_args!(args) do
+    {opts, rest, errors} =
+      OptionParser.parse(args,
+        strict: [
+          artifact_dir: :string,
+          compare_path: :string,
+          message: :string
+        ]
+      )
+
+    unless rest == [], do: Mix.raise("Unexpected arguments: #{inspect(rest)}")
+    unless errors == [], do: Mix.raise("Invalid options: #{inspect(errors)}")
+
+    %{
+      artifact_dir: Keyword.get(opts, :artifact_dir, Artifact.default_output_dir()),
+      compare_path: Keyword.get(opts, :compare_path, @default_compare_path),
+      message: Keyword.get(opts, :message, @default_message)
+    }
+  end
+
+  defp ensure_manifest_contract!(manifest) do
+    HITL.assert!(manifest["status"] == "complete", {:invalid_artifact_status, manifest["status"]})
+    HITL.assert!(manifest["export_complete"] == true, :artifact_export_incomplete)
+
+    HITL.assert!(
+      manifest["selected_tensor_count"] == 9,
+      {:invalid_selected_tensor_count, manifest["selected_tensor_count"]}
+    )
+
+    HITL.assert!(
+      manifest["selected_singular_value_count"] == 9_216,
+      {:invalid_selected_singular_value_count, manifest["selected_singular_value_count"]}
+    )
   end
 
   defp prove_tensor_patch!(base_params, adapted_params, path) do

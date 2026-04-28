@@ -12,7 +12,7 @@ XLA_TARGET=cuda12 mix test
 Current expected result:
 
 ```text
-1 doctest, 150 tests, 0 failures, 25 excluded
+1 doctest, 159 tests, 0 failures, 25 excluded
 ```
 
 The excluded tests include slow Qwen/SVD gates and expensive artifact export
@@ -107,6 +107,30 @@ python3 priv/sakana_trinity/scripts/compare_sakana_parity_reports.py \
 This is expected to fail in the current state.
 
 ## Expensive Gates
+
+Adapted coordinator smoke against the canonical import from Phase 2:
+
+```bash
+XLA_TARGET=cuda12 mix trinity.hitl.adapted \
+  --artifact-dir tmp/sakana_parity/adapted_artifacts_from_python
+```
+
+This gate must print:
+
+```text
+Artifact status: complete
+Artifact layout: checkpoint_directory
+Selected tensor count: 9
+Selected singular value count: 9216
+adapted Qwen vector shape: {1, 1024}
+adapted route logits shape: {1, 10}
+adapted agent logits shape: {7}
+adapted role logits shape: {3}
+```
+
+It proves the imported artifact can patch Qwen, load the router head, and route
+a fixed transcript on CUDA. It does not replace router trace parity, which still
+needs a Python side-by-side trace for tokenization, hidden vector, and logits.
 
 Qwen-focused tests:
 

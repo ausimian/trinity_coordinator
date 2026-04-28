@@ -66,6 +66,9 @@ Working now:
 - Full Python semantic export imports into canonical checkpoint-directory
   Elixir artifacts with 9 target-verified tensors, 9,216 singular offsets, and
   router head shape `{10, 1024}`.
+- The adapted coordinator smoke loads those canonical artifacts, patches Qwen,
+  and routes a fixed transcript on CUDA with hidden `{1, 1024}`, logits
+  `{1, 10}`, agent logits `{7}`, and role logits `{3}`.
 
 Current parity result:
 
@@ -84,6 +87,9 @@ Current parity result:
   `artifact_layout=checkpoint_directory`, `selected_tensor_count=9`,
   `selected_singular_value_count=9216`, `loaded_tensor_count=9`, and
   `target_verified_count=9`.
+- Adapted coordinator validation passes against
+  `tmp/sakana_parity/adapted_artifacts_from_python`; the observed fixed-route
+  smoke selected `agent_id=4`, `role_id=2`, public role `Verifier`.
 
 Recent non-matching Elixir final hashes have included
 `bf089ea0607c93ae69f92bf7b9fcf71dc2a2b53d231cfe307b8cd6f4ef6a85ae` and
@@ -200,6 +206,29 @@ python3 priv/sakana_trinity/scripts/compare_sakana_parity_reports.py \
 
 That exact-byte gate is expected to fail in the current state while functional
 stage parity passes.
+
+## Adapted Coordinator Smoke
+
+After generating and importing the full Python semantic export, validate the
+live adapted Qwen coordinator directly:
+
+```bash
+XLA_TARGET=cuda12 mix trinity.hitl.adapted \
+  --artifact-dir tmp/sakana_parity/adapted_artifacts_from_python
+```
+
+This proves the runtime shape contract:
+
+```text
+adapted Qwen vector shape: {1, 1024}
+adapted route logits shape: {1, 10}
+adapted agent logits shape: {7}
+adapted role logits shape: {3}
+```
+
+The next required confidence gate is router trace parity: Python and Elixir must
+emit a fixed-transcript trace comparing tokenization, hidden extraction,
+router-head weights, logits, and selected agent/role ids.
 
 For the opt-in all-selected tensor gate, generate Python components and the
 source-oriented all-selected stage bundle with original SVD components:
