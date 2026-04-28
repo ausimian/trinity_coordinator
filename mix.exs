@@ -87,6 +87,7 @@ defmodule TrinityCoordinator.MixProject do
         "guides/python_parity_reconstruction.md",
         "guides/stage_checks_and_tolerances.md",
         "guides/artifacts_and_export.md",
+        "guides/svd_generation_runbook.md",
         "guides/service_buildout.md",
         "guides/operations_qc.md",
         "guides/troubleshooting.md",
@@ -107,7 +108,7 @@ defmodule TrinityCoordinator.MixProject do
         Project: ~r/^(README|CHANGELOG|LICENSE)/,
         "Start Here": ~r/guides\/(onboarding|current_direction|system_architecture)\.md/,
         "Parity Guides":
-          ~r/guides\/(python_parity_reconstruction|stage_checks_and_tolerances|artifacts_and_export)\.md/,
+          ~r/guides\/(python_parity_reconstruction|stage_checks_and_tolerances|artifacts_and_export|svd_generation_runbook)\.md/,
         "Service Buildout": ~r/guides\/(service_buildout|operations_qc|troubleshooting)\.md/,
         "Reference Notes": ~r/docs\//
       ],

@@ -89,9 +89,10 @@ Read the guides in this order:
 4. [Recreating The Python Parity Process](guides/python_parity_reconstruction.md)
 5. [Stage Checks And Tolerances](guides/stage_checks_and_tolerances.md)
 6. [Sakana Artifacts And Export](guides/artifacts_and_export.md)
-7. [Service Buildout Plan](guides/service_buildout.md)
-8. [Operations And Quality Gates](guides/operations_qc.md)
-9. [Troubleshooting](guides/troubleshooting.md)
+7. [SVD Generation Runbook](guides/svd_generation_runbook.md)
+8. [Service Buildout Plan](guides/service_buildout.md)
+9. [Operations And Quality Gates](guides/operations_qc.md)
+10. [Troubleshooting](guides/troubleshooting.md)
 
 Additional technical reference notes are included in HexDocs under
 `Reference Notes`.
