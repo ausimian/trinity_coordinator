@@ -66,12 +66,16 @@ Working now:
 
 Current parity result:
 
-- Python in-memory and Python safetensors readback both produce
-  `5aaa24c15898794dec09dccae650e35549c33cc24815e70ac6641cc3b466b725`.
-- Elixir semantic `torch_v` currently produces non-matching final `bf16`
-  hashes in recent reports.
-- Source tensors, offsets, and scaled singular values byte-match.
-- Required f32 reconstruction stages pass explicit tolerances.
+- Original-submission `svd_weights.pt` generation succeeds and produces
+  current Python safetensors readback hash
+  `b4cab13f8a82ccaf49603356e658bc9b77f65b08a69678a7d053a2e4b3197c43`.
+- Historical stored hash
+  `600be6ab0f5a34325b9857182ccb5fce5971549a0ce8588cdacc992eda54014c`
+  remains non-reproducible from that regenerated `.pt`.
+- The bounded layer-26 all-selected replay checks 7 tensors, 70 stages, and 63
+  required stages with `failed_required=0`.
+- Source tensors, offsets, scaled singular values, and `u_scaled` byte-match;
+  required f32 reconstruction stages pass explicit tolerances.
 - Final `bf16` byte matching remains aspirational and is reported separately.
 
 Recent non-matching Elixir final hashes have included

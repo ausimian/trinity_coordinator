@@ -123,16 +123,23 @@ first fails and explain the likely backend reason.
 Current Python in-memory and Python safetensors readback both produce:
 
 ```text
-5aaa24c15898794dec09dccae650e35549c33cc24815e70ac6641cc3b466b725
+b4cab13f8a82ccaf49603356e658bc9b77f65b08a69678a7d053a2e4b3197c43
 ```
 
-Elixir semantic `torch_v` currently produces non-matching final `bf16` hashes
-in recent reports.
+This value comes from the regenerated original-submission `svd_weights.pt` path.
+That regenerated `.pt` still does not reproduce the historical stored
+`600be6...` manifest hash, so `600be6...` remains provenance-bound metadata.
+
+Elixir semantic `torch_v` currently produces non-matching final `bf16` hashes.
+For the latest bounded layer-26 all-selected run, the semantic final hashes were
+per-tensor and did not match the single sample Python hash.
 
 ```text
-observed examples:
-bf089ea0607c93ae69f92bf7b9fcf71dc2a2b53d231cfe307b8cd6f4ef6a85ae
-74dc61d765c95e80ca7298b6e97f29a4fd76e2ae4bfb348b2abbffcbc5e0dff8
+latest gate:
+selected_tensors_checked=7
+total_checks=70
+required_checks=63
+failed_required=0
 ```
 
 The stage checks isolate the mismatch:
