@@ -20,7 +20,9 @@ defmodule TrinityCoordinator.Orchestrator do
 
   alias TrinityCoordinator.Sakana.Artifact
 
-  @roles %{0 => "Thinker", 1 => "Worker", 2 => "Verifier"}
+  # Imported Sakana/TRINITY checkpoints emit role logits in the supplemental
+  # Python order: solver, thinker, verifier. Public docs call solver "Worker".
+  @roles %{0 => "Worker", 1 => "Thinker", 2 => "Verifier"}
   @default_max_turns 5
 
   @doc """

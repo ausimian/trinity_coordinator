@@ -54,7 +54,7 @@ defmodule TrinityCoordinator.OrchestratorMockTest do
     model = CoordinationHead.build_model(input_dim, num_agents, num_roles)
     {init_fn, _predict_fn} = Axon.build(model)
     params = init_fn.(Nx.template({1, input_dim}, :f32), Axon.ModelState.empty())
-    params = force_role_bias(params, [0.0, 0.0, 10.0, 0.0])
+    params = force_role_bias(params, [0.0, 10.0, 0.0, 0.0])
 
     extractor_fn = fn _messages ->
       %{
@@ -86,6 +86,46 @@ defmodule TrinityCoordinator.OrchestratorMockTest do
              )
 
     assert :counters.get(counter, 1) == 1
+  end
+
+  test "default runtime role order preserves imported Python checkpoint order" do
+    input_dim = 4
+    num_agents = 1
+    num_roles = 3
+
+    model = CoordinationHead.build_model(input_dim, num_agents, num_roles)
+    {init_fn, _predict_fn} = Axon.build(model)
+    params = init_fn.(Nx.template({1, input_dim}, :f32), Axon.ModelState.empty())
+    params = force_role_bias(params, [0.0, 10.0, 0.0, 0.0])
+
+    extractor_fn = fn _messages ->
+      %{
+        vector: Nx.broadcast(0.0, {1, input_dim}),
+        vector_shape: {1, input_dim},
+        hidden_state_shape: {1, 2, input_dim},
+        input_shapes: %{}
+      }
+    end
+
+    mock_agent_fn = fn role, _messages, metadata ->
+      assert role == :worker
+      assert metadata.role_name == "Worker"
+      assert metadata.agent_id == 0
+      {:ok, "raw role 0 reached Worker/solver compatibility path"}
+    end
+
+    {:ok, pid} = StateManager.start_link([%{role: "user", content: "do work"}])
+
+    assert {:error, :max_turns_reached} =
+             Orchestrator.run_loop(pid, model, params,
+               max_turns: 1,
+               num_agents: num_agents,
+               num_roles: num_roles,
+               slm_context: :mock_context,
+               extractor_fn: extractor_fn,
+               mock_agent_fn: mock_agent_fn,
+               provider_pool: :mock
+             )
   end
 
   test "mock loop emits extraction route provider and verifier trace events" do
