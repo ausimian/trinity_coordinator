@@ -8,7 +8,7 @@ defmodule Mix.Tasks.Trinity.Sakana.ExportAdapted do
 
   use Mix.Task
 
-  alias TrinityCoordinator.Sakana.{Artifact, ExportSpec, Exporter}
+  alias TrinityCoordinator.Sakana.{ExportSpec, Exporter}
 
   @shortdoc "Exports Sakana-adapted Qwen tensors and router head"
 
