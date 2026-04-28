@@ -29,11 +29,23 @@ defmodule TrinityCoordinator.Sakana.SVD do
 
   def decomposable_tensor?(_), do: false
 
-  @doc "Runs a reduced SVD over one tensor."
+  @doc """
+  Runs a reduced SVD over one tensor.
+
+  Options:
+
+    * `:full_matrices?` - forwarded to `Nx.LinAlg.svd/2`, defaults to `false`.
+    * `:compute_type` - `:source` to decompose the tensor as given, or `:f32`
+      to first promote the tensor to `f32`. The explicit `:f32` mode is useful
+      when comparing against Sakana's Python reference path, where low-precision
+      Qwen weights are decomposed through a float32 SVD path before the adapted
+      tensor is finally cast back to `bf16`.
+  """
   def decompose_tensor(%Nx.Tensor{} = tensor, opts \\ []) do
-    opts = Keyword.validate!(opts, full_matrices?: false)
-    {u, s, v} = svd_tuple!(tensor, opts)
-    %{u: u, s: s, v: v, shape: Nx.shape(tensor)}
+    opts = Keyword.validate!(opts, full_matrices?: false, compute_type: :source)
+    svd_source = svd_source_tensor!(tensor, opts[:compute_type])
+    {u, s, v} = svd_tuple!(svd_source, opts)
+    %{u: u, s: s, v: v, shape: Nx.shape(svd_source), source_type: Nx.type(tensor)}
   end
 
   @doc """
@@ -43,15 +55,25 @@ defmodule TrinityCoordinator.Sakana.SVD do
   it applies `S * (1 + scale_offsets)` and Sakana's singular-value sum
   normalization.
   """
-  def reconstruct(%{u: u, s: s, v: v}, scale_offsets) do
+  def reconstruct(decomposition, scale_offsets, opts \\ [])
+
+  def reconstruct(%{u: u, s: s, v: v}, scale_offsets, opts) do
+    opts = Keyword.validate!(opts, v_layout: :nx, output_type: nil)
     scale_offsets = Nx.as_type(scale_offsets, Nx.type(s))
     scaled_s = Nx.multiply(s, Nx.add(scale_offsets, 1))
     normalization = Nx.divide(Nx.sum(s), Nx.sum(scaled_s))
+    v_for_dot = v_for_reconstruction!(v, opts[:v_layout])
 
-    u
-    |> Nx.multiply(Nx.reshape(scaled_s, {1, Nx.axis_size(scaled_s, 0)}))
-    |> Nx.dot(v)
-    |> Nx.multiply(normalization)
+    reconstructed =
+      u
+      |> Nx.multiply(Nx.reshape(scaled_s, {1, Nx.axis_size(scaled_s, 0)}))
+      |> Nx.dot(v_for_dot)
+      |> Nx.multiply(normalization)
+
+    case opts[:output_type] do
+      nil -> reconstructed
+      target_type -> Nx.as_type(reconstructed, target_type)
+    end
   end
 
   @doc "Flattens nested tensor containers into stable string paths."
@@ -129,7 +151,7 @@ defmodule TrinityCoordinator.Sakana.SVD do
 
   @doc "Decomposes selected tensor entries and records scale-vector spans."
   def decompose_tensors(tensors, opts \\ []) when is_list(tensors) do
-    opts = Keyword.validate!(opts, progress: nil)
+    opts = Keyword.validate!(opts, progress: nil, svd_compute_type: :source)
     progress = opts[:progress]
     total = length(tensors)
 
@@ -149,7 +171,8 @@ defmodule TrinityCoordinator.Sakana.SVD do
         singular_values: count
       })
 
-      {elapsed_us, decomposition} = :timer.tc(fn -> decompose_tensor(tensor) end)
+      {elapsed_us, decomposition} =
+        :timer.tc(fn -> decompose_tensor(tensor, compute_type: opts[:svd_compute_type]) end)
 
       emit_progress(progress, %{
         event: :decompose_finished,
@@ -199,7 +222,7 @@ defmodule TrinityCoordinator.Sakana.SVD do
         offsets =
           scale_offsets
           |> Nx.slice([offset], [count])
-          |> Nx.as_type(Nx.type(item.tensor))
+          |> Nx.as_type(Nx.type(item.decomposition.s))
 
         {elapsed_us, tensor} =
           :timer.tc(fn ->
@@ -230,10 +253,10 @@ defmodule TrinityCoordinator.Sakana.SVD do
 
   @doc "Decomposes and reconstructs selected tensors with Sakana scale offsets."
   def adapt_tensors(tensors, scale_offsets, opts \\ []) when is_list(tensors) do
-    opts = Keyword.validate!(opts, progress: nil)
+    opts = Keyword.validate!(opts, progress: nil, svd_compute_type: :source)
 
     tensors
-    |> decompose_tensors(progress: opts[:progress])
+    |> decompose_tensors(progress: opts[:progress], svd_compute_type: opts[:svd_compute_type])
     |> reconstruct_tensors(scale_offsets, progress: opts[:progress])
   end
 
@@ -415,6 +438,20 @@ defmodule TrinityCoordinator.Sakana.SVD do
 
   defp emit_progress(nil, _event), do: :ok
   defp emit_progress(fun, event) when is_function(fun, 1), do: fun.(event)
+
+  defp svd_source_tensor!(tensor, :source), do: tensor
+  defp svd_source_tensor!(tensor, :f32), do: Nx.as_type(tensor, :f32)
+
+  defp svd_source_tensor!(_tensor, compute_type) do
+    raise ArgumentError, "unsupported SVD compute_type #{inspect(compute_type)}"
+  end
+
+  defp v_for_reconstruction!(%Nx.Tensor{} = v, layout) when layout in [:nx, :vh], do: v
+  defp v_for_reconstruction!(%Nx.Tensor{} = v, :torch_v), do: Nx.transpose(v)
+
+  defp v_for_reconstruction!(_v, other) do
+    raise ArgumentError, "unsupported SVD v_layout #{inspect(other)}; expected :nx, :vh, or :torch_v"
+  end
 
   defp svd_tuple!(tensor, opts) do
     svd = Function.capture(Nx.LinAlg, :svd, 2)

@@ -380,8 +380,14 @@ defmodule TrinityCoordinator.Sakana.PythonImporter do
 
     target = Map.get(targets.by_path, entry.elixir_name)
     target_shape = target_shape(target, source_shape)
+    source_reference = source_reference_tensor(target, source_shape)
+    v_layout = choose_python_v_layout(%{u: u, s: s, v: v}, source_reference)
 
-    reconstructed = SVD.reconstruct(%{u: u, s: s, v: v}, Nx.as_type(offsets, Nx.type(s)))
+    reconstructed =
+      SVD.reconstruct(%{u: u, s: s, v: v}, Nx.as_type(offsets, Nx.type(s)),
+        v_layout: v_layout.layout
+      )
+
     reconstructed = orient_for_target!(reconstructed, target_shape, entry.elixir_name)
 
     reconstructed =
@@ -404,8 +410,47 @@ defmodule TrinityCoordinator.Sakana.PythonImporter do
       offset_start: entry.offset_start,
       offset_end: entry.offset_end,
       component_keys: keys,
+      python_v_layout: Atom.to_string(v_layout.layout),
+      python_component_zero_error: v_layout.zero_error,
       target_verified: targets.verified? and not is_nil(target)
     }
+  end
+
+  defp source_reference_tensor(nil, _source_shape), do: nil
+
+  defp source_reference_tensor(%{tensor: %Nx.Tensor{} = tensor}, source_shape) do
+    orient_for_target!(Nx.as_type(tensor, :f32), source_shape, "source_reference")
+  end
+
+  defp choose_python_v_layout(_decomp, nil), do: %{layout: :nx, zero_error: nil}
+
+  defp choose_python_v_layout(%{s: s} = decomp, %Nx.Tensor{} = source_reference) do
+    zeros = Nx.broadcast(0.0, Nx.shape(s)) |> Nx.as_type(Nx.type(s))
+
+    [:nx, :torch_v]
+    |> Enum.map(fn layout ->
+      try do
+        reconstructed = SVD.reconstruct(decomp, zeros, v_layout: layout)
+        error = max_abs_error(reconstructed, source_reference)
+        %{layout: layout, zero_error: error}
+      rescue
+        _ -> %{layout: layout, zero_error: :infinity}
+      end
+    end)
+    |> Enum.reject(&(&1.zero_error == :infinity))
+    |> case do
+      [] -> raise ArgumentError, "no Python V layout can reconstruct source shape #{inspect(Nx.shape(source_reference))}"
+      candidates -> Enum.min_by(candidates, & &1.zero_error)
+    end
+  end
+
+  defp max_abs_error(left, right) do
+    left
+    |> Nx.as_type(:f32)
+    |> Nx.subtract(Nx.as_type(right, :f32))
+    |> Nx.abs()
+    |> Nx.reduce_max()
+    |> Nx.to_number()
   end
 
   defp component_keys(entry) do
@@ -571,6 +616,8 @@ defmodule TrinityCoordinator.Sakana.PythonImporter do
           "checkpoint_path" => rel,
           "checkpoint_sha256" => sha,
           "component_keys" => result.component_keys,
+          "python_v_layout" => Map.get(result, :python_v_layout),
+          "python_component_zero_error" => Map.get(result, :python_component_zero_error),
           "target_verified" => result.target_verified,
           "backend_observed_during_export" =>
             TrinityCoordinator.Runtime.tensor_backend(result.tensor),
