@@ -69,6 +69,10 @@ Working now:
 - The adapted coordinator smoke loads those canonical artifacts, patches Qwen,
   and routes a fixed transcript on CUDA with hidden `{1, 1024}`, logits
   `{1, 10}`, agent logits `{7}`, and role logits `{3}`.
+- Fixed-transcript router trace parity passes for exact transcript, token ids,
+  router-head hash, and argmax agent/role ids. Hidden/logit vectors are compared
+  with declared alignment thresholds because Python currently runs this trace on
+  CPU while Elixir runs Qwen through EXLA CUDA.
 
 Current parity result:
 
@@ -89,7 +93,10 @@ Current parity result:
   `target_verified_count=9`.
 - Adapted coordinator validation passes against
   `tmp/sakana_parity/adapted_artifacts_from_python`; the observed fixed-route
-  smoke selected `agent_id=4`, `role_id=2`, public role `Verifier`.
+  smoke selected `agent_id=4`, `role_id=0`, public role `Worker`.
+- Router trace parity passes with exact token ids and head hash, exact
+  `agent_id=4`/`role_id=0`, hidden cosine `0.99449`, and logits cosine
+  `0.99743`.
 
 Recent non-matching Elixir final hashes have included
 `bf089ea0607c93ae69f92bf7b9fcf71dc2a2b53d231cfe307b8cd6f4ef6a85ae` and
@@ -226,9 +233,42 @@ adapted agent logits shape: {7}
 adapted role logits shape: {3}
 ```
 
-The next required confidence gate is router trace parity: Python and Elixir must
-emit a fixed-transcript trace comparing tokenization, hidden extraction,
-router-head weights, logits, and selected agent/role ids.
+The live CUDA smoke proves the operational shape contract. The router trace
+below adds the side-by-side Python/Elixir semantic check for tokenization,
+hidden extraction, router-head weights, logits, and selected agent/role ids.
+
+## Router Trace Parity
+
+Generate the Python trace from the canonical artifact directory. On the current
+RTX 5060 Ti host, PyTorch 2.7.1 does not ship CUDA kernels for `sm_120`, so this
+trace is run on CPU:
+
+```bash
+uv run --python 3.11 \
+  --with torch==2.7.1 \
+  --with transformers==4.55.2 \
+  --with accelerate==1.6.0 \
+  --with safetensors \
+  python priv/sakana_trinity/scripts/debug_sakana_router_trace.py \
+    --artifact-dir tmp/sakana_parity/adapted_artifacts_from_python \
+    --device cpu \
+    --model-torch-dtype bfloat16 \
+    --out tmp/sakana_parity/python_router_trace_bf16_cpu.json
+```
+
+Compare from Elixir:
+
+```bash
+XLA_TARGET=cuda12 mix trinity.sakana.router_trace \
+  --artifact-dir tmp/sakana_parity/adapted_artifacts_from_python \
+  --python-report tmp/sakana_parity/python_router_trace_bf16_cpu.json \
+  --out tmp/sakana_parity/elixir_router_trace.json
+```
+
+Required exact checks: transcript hash, token ids, router-head hash,
+hidden/logit shapes, and argmax agent/role ids. Hidden/logit numeric payloads
+must pass declared cosine and relative-L2 alignment thresholds; max/mean
+absolute errors remain diagnostics.
 
 For the opt-in all-selected tensor gate, generate Python components and the
 source-oriented all-selected stage bundle with original SVD components:

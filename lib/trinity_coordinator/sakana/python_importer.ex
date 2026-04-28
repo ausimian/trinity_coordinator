@@ -444,7 +444,8 @@ defmodule TrinityCoordinator.Sakana.PythonImporter do
     reconstructed =
       SVD.reconstruct(%{u: u, s: s, v: v}, Nx.as_type(offsets, Nx.type(s)), v_layout: v_layout)
 
-    reconstructed = orient_for_target!(reconstructed, target_shape, entry.elixir_name)
+    reconstructed =
+      orient_for_target!(reconstructed, target_shape, entry.elixir_name, entry.source_name)
 
     reconstructed =
       if (opts.cast_tensors and target) && match?(%Nx.Tensor{}, target.tensor) do
@@ -533,10 +534,14 @@ defmodule TrinityCoordinator.Sakana.PythonImporter do
   defp target_shape(nil, source_shape), do: source_shape
   defp target_shape(%{tensor: %Nx.Tensor{} = tensor}, _source_shape), do: Nx.shape(tensor)
 
-  defp orient_for_target!(tensor, nil, _path), do: tensor
+  defp orient_for_target!(tensor, nil, _path, _source_name), do: tensor
 
-  defp orient_for_target!(tensor, target_shape, path) do
+  defp orient_for_target!(tensor, target_shape, path, source_name) do
     cond do
+      qwen_layer_linear_source?(source_name, path) and tuple_size(Nx.shape(tensor)) == 2 and
+          Nx.shape(Nx.transpose(tensor)) == target_shape ->
+        Nx.transpose(tensor)
+
       Nx.shape(tensor) == target_shape ->
         tensor
 
@@ -548,6 +553,15 @@ defmodule TrinityCoordinator.Sakana.PythonImporter do
               "reconstructed tensor #{path} shape mismatch: got #{inspect(Nx.shape(tensor))}, target #{inspect(target_shape)}"
     end
   end
+
+  defp qwen_layer_linear_source?(source_name, path)
+       when is_binary(source_name) and is_binary(path) do
+    String.starts_with?(source_name, "model.layers.") and
+      String.ends_with?(source_name, ".weight") and
+      String.ends_with?(path, ".kernel")
+  end
+
+  defp qwen_layer_linear_source?(_source_name, _path), do: false
 
   defp write_canonical_bundle(
          opts,

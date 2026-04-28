@@ -42,24 +42,26 @@ Compatibility mode should mirror the supplemental Python loop:
 
 The implementation order is:
 
-1. all-selected tensor stage parity;
-2. canonical Python semantic bundle import;
-3. adapted Qwen coordinator profile validation;
-4. fixed-transcript router trace parity;
+1. all-selected tensor stage parity - complete for bounded layer-26 replay;
+2. canonical Python semantic bundle import - complete;
+3. adapted Qwen coordinator profile validation - complete;
+4. fixed-transcript router trace parity - complete;
 5. runtime service loop with trace persistence and provider adapters.
 
-Do not skip router trace parity. The adapted profile may load and emit logits
-while still disagreeing with Python on tokenization, hidden-position extraction,
-or head application. Router trace parity is the gate that answers whether the
-model is ready to route.
+Router trace parity is now the gate that caught the square k/v orientation bug:
+the adapted profile loaded and emitted logits, but Python and Elixir disagreed
+until square Qwen layer kernels were transposed by semantic source path. Keep
+that trace in the release checklist.
 
 Complete adapted artifact validation:
 
-- run full export for all selected tensors;
-- validate merged artifacts;
-- load `:qwen_sakana_adapted` repeatedly from disk;
-- verify route shape and backend metadata;
-- add a canonical smoke command for adapted routing.
+- promote or copy the validated `tmp/sakana_parity/adapted_artifacts_from_python`
+  bundle to the default `priv/sakana_trinity/adapted_qwen3_0_6b_layer26` runtime
+  path when ready;
+- keep `mix trinity.hitl.adapted --artifact-dir ...` as the canonical smoke
+  command for adapted routing;
+- keep `mix trinity.sakana.router_trace --python-report ...` as the Python
+  parity gate before service changes.
 
 Strengthen provider integration:
 

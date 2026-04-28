@@ -84,7 +84,9 @@ large cleanup diff on top.
    - Status: complete for
      `tmp/sakana_parity/adapted_artifacts_from_python`; the importer writes
      checkpoint-directory artifacts with 9 target-verified tensors and router
-     head shape `{10, 1024}`.
+     head shape `{10, 1024}`. The importer now transposes Qwen layer kernels by
+     semantic source path, which is required for square k/v projection matrices
+     where shape alone cannot reveal orientation.
 3. Load `:qwen_sakana_adapted` as the service coordinator profile:
    - apply adapted tensors;
    - load router head;
@@ -98,6 +100,9 @@ large cleanup diff on top.
 4. Add fixed-transcript router trace parity:
    - compare tokenization, hidden extraction, head weights, logits, and argmax
      agent/role between Python and Elixir.
+   - Status: complete. Exact transcript/token/head/argmax parity passes for the
+     fixed trace; hidden/logit tensors pass declared cosine and relative-L2
+     alignment thresholds across Python CPU bf16 and Elixir EXLA CUDA.
 5. Run a complete local coordinator loop:
    - transcript in;
    - Qwen hidden state extracted;
@@ -182,10 +187,20 @@ The latest run validated:
 - route logits shape `{1, 10}`;
 - agent logits shape `{7}`;
 - role logits shape `{3}`;
-- observed route `agent_id=4`, `role_id=2`, public role `Verifier`.
+- observed route `agent_id=4`, `role_id=0`, public role `Worker`.
 
 This means the imported Python semantic bundle is operational as a local Qwen
-router. The remaining confidence gap before declaring the model fully ready to
-route production traffic is fixed-transcript Python/Elixir router trace parity:
-token ids, hidden extraction position, hidden vector, head weights, logits, and
-argmax ids must be compared side by side.
+router. The fixed-transcript Python/Elixir router trace now passes exact
+transcript, token-id, head-hash, and argmax-id checks. Hidden and logit payloads
+are not byte-identical across Python CPU and Elixir EXLA CUDA, but they pass the
+declared alignment gate:
+
+```text
+hidden cosine >= 0.99, observed 0.99449
+hidden relative L2 <= 0.12, observed 0.10493
+logits cosine >= 0.99, observed 0.99743
+logits relative L2 <= 0.10, observed 0.07303
+```
+
+The next implementation gap is the runtime service loop: route decisions need
+to drive role injection, provider adapters, and persisted traces.

@@ -150,6 +150,15 @@ router_head_shape=[10, 1024]
 target_verified_count=9
 ```
 
+Orientation is semantic, not only shape-driven. PyTorch stores Qwen linear
+weights in source layout, while Bumblebee dense kernels use target layout. Most
+selected layer tensors reveal this through reversed rectangular shapes, but
+`k_proj` and `v_proj` are square `{1024, 1024}` matrices. The importer therefore
+transposes Qwen `model.layers.*.weight` tensors whose Elixir target is a
+`.kernel` path even when the source and target shapes are identical. This rule
+was validated by fixed-transcript router trace parity; without it, token and
+head hashes still matched but hidden/logit parity and role argmax diverged.
+
 ## Elixir Artifact Export
 
 The Elixir export task materializes adapted artifacts:

@@ -12,7 +12,7 @@ XLA_TARGET=cuda12 mix test
 Current expected result:
 
 ```text
-1 doctest, 159 tests, 0 failures, 25 excluded
+1 doctest, 163 tests, 0 failures, 25 excluded
 ```
 
 The excluded tests include slow Qwen/SVD gates and expensive artifact export
@@ -129,8 +129,36 @@ adapted role logits shape: {3}
 ```
 
 It proves the imported artifact can patch Qwen, load the router head, and route
-a fixed transcript on CUDA. It does not replace router trace parity, which still
-needs a Python side-by-side trace for tokenization, hidden vector, and logits.
+a fixed transcript on CUDA. Pair it with router trace parity when validating
+artifact semantics against Python.
+
+Router trace parity:
+
+```bash
+uv run --python 3.11 \
+  --with torch==2.7.1 \
+  --with transformers==4.55.2 \
+  --with accelerate==1.6.0 \
+  --with safetensors \
+  python priv/sakana_trinity/scripts/debug_sakana_router_trace.py \
+    --artifact-dir tmp/sakana_parity/adapted_artifacts_from_python \
+    --device cpu \
+    --model-torch-dtype bfloat16 \
+    --out tmp/sakana_parity/python_router_trace_bf16_cpu.json
+```
+
+```bash
+XLA_TARGET=cuda12 mix trinity.sakana.router_trace \
+  --artifact-dir tmp/sakana_parity/adapted_artifacts_from_python \
+  --python-report tmp/sakana_parity/python_router_trace_bf16_cpu.json \
+  --out tmp/sakana_parity/elixir_router_trace.json
+```
+
+The current PyTorch 2.7.1 wheel cannot execute CUDA kernels on the RTX 5060 Ti
+`sm_120`, so the Python trace runs on CPU. The required comparison is exact for
+transcript, token ids, router-head hash, shapes, and argmax ids; hidden and
+logit payloads use declared cosine and relative-L2 alignment thresholds with
+max/mean absolute errors retained as diagnostics.
 
 Qwen-focused tests:
 

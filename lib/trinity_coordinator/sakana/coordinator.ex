@@ -24,7 +24,8 @@ defmodule TrinityCoordinator.Sakana.Coordinator do
           required(:artifact_dir) => String.t(),
           required(:num_agents) => pos_integer(),
           required(:num_roles) => pos_integer(),
-          required(:hidden_size) => pos_integer()
+          required(:hidden_size) => pos_integer(),
+          required(:backend) => term()
         }
 
   @doc """
@@ -78,7 +79,8 @@ defmodule TrinityCoordinator.Sakana.Coordinator do
          artifact_dir: opts[:artifact_dir],
          num_agents: head_state.num_agents,
          num_roles: head_state.num_roles,
-         hidden_size: head_state.hidden_size
+         hidden_size: head_state.hidden_size,
+         backend: opts[:backend]
        }}
     else
       {:error, reason} -> {:error, reason}
@@ -98,14 +100,31 @@ defmodule TrinityCoordinator.Sakana.Coordinator do
              coordinator.tokenizer,
              messages
            ) do
+      # EXLA may donate the route input during the head forward pass. Keep a
+      # host snapshot for router trace diagnostics before passing the CUDA
+      # tensor into Axon.
+      vector_snapshot = Nx.backend_transfer(extraction.vector, Nx.BinaryBackend)
+
+      route_input =
+        if coordinator.backend do
+          Nx.backend_transfer(vector_snapshot, coordinator.backend)
+        else
+          vector_snapshot
+        end
+
       route =
         TrinityCoordinator.CoordinationHead.route(
           coordinator.routing_model,
           coordinator.routing_params,
-          extraction.vector,
+          route_input,
           coordinator.num_agents,
           coordinator.num_roles
         )
+
+      extraction =
+        extraction
+        |> Map.put(:vector, route_input)
+        |> Map.put(:vector_snapshot, vector_snapshot)
 
       {:ok, %{extraction: extraction, route: route}}
     end

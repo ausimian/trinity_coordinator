@@ -109,11 +109,17 @@ defmodule TrinityCoordinator.Extractor do
          {:ok, hidden_states} <- extract_hidden_states(outputs),
          {:ok, hidden_state} <- extract_last_layer_hidden_state(hidden_states),
          {:ok, penultimate} <- extract_penultimate_vector(hidden_state) do
+      hidden_state_shape = Nx.shape(hidden_state)
+
       {:ok,
        %{
          transcript: transcript,
+         input_ids: input_tensor(inputs, "input_ids"),
+         attention_mask: input_tensor(inputs, "attention_mask"),
          input_shapes: input_shapes(inputs),
-         hidden_state_shape: Nx.shape(hidden_state),
+         hidden_state_shape: hidden_state_shape,
+         hidden_position: -2,
+         hidden_index: penultimate_index(hidden_state_shape),
          vector_shape: Nx.shape(penultimate),
          vector: penultimate
        }}
@@ -243,4 +249,32 @@ defmodule TrinityCoordinator.Extractor do
   end
 
   defp input_shapes(_), do: :unknown
+
+  defp input_tensor(inputs, key) when is_map(inputs) and is_binary(key) do
+    case Map.fetch(inputs, key) do
+      {:ok, %Nx.Tensor{} = tensor} ->
+        tensor
+
+      _ ->
+        case existing_atom_key(key) do
+          nil -> nil
+          atom -> tensor_or_nil(Map.get(inputs, atom))
+        end
+    end
+  end
+
+  defp input_tensor(_inputs, _key), do: nil
+
+  defp existing_atom_key(key) do
+    String.to_existing_atom(key)
+  rescue
+    ArgumentError -> nil
+  end
+
+  defp tensor_or_nil(%Nx.Tensor{} = tensor), do: tensor
+  defp tensor_or_nil(_), do: nil
+
+  defp penultimate_index({_batch, seq_len, _hidden_dim}) when seq_len <= 1, do: 0
+  defp penultimate_index({_batch, seq_len, _hidden_dim}), do: seq_len - 2
+  defp penultimate_index(_shape), do: nil
 end

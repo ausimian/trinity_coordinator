@@ -329,6 +329,82 @@ defmodule TrinityCoordinator.Sakana.PythonImporterTest do
     refute_all_close(adapted, wrong_vh, atol: 1.0e-6)
   end
 
+  test "transposes square Qwen layer kernels by semantic path, not only by shape" do
+    source_dir = unique_tmp_dir("python_source_square_orientation")
+    out_dir = unique_tmp_dir("python_out_square_orientation")
+    File.rm_rf!(out_dir)
+
+    on_exit(fn ->
+      File.rm_rf(source_dir)
+      File.rm_rf(out_dir)
+    end)
+
+    components_path = Path.join(source_dir, "trinity_svf_components.safetensors")
+    scales_path = Path.join(source_dir, "trinity_svf_scale_offsets.safetensors")
+    head_path = Path.join(source_dir, "trinity_router_head.safetensors")
+    manifest_path = Path.join(source_dir, "trinity_sakana_export_manifest.json")
+
+    u = Nx.tensor([[1.0, 0.0], [0.0, 1.0]], type: :f32)
+    s = Nx.tensor([1.0, 2.0], type: :f32)
+    v = Nx.tensor([[0.0, -1.0], [1.0, 0.0]], type: :f32)
+    offsets = Nx.tensor([0.0, 0.0], type: :f32)
+    head = Nx.iota({4, 2}, type: :f32)
+
+    Safetensors.write!(components_path, %{
+      "svd.U.model.layers.26.self_attn.k_proj.weight" => u,
+      "svd.S.model.layers.26.self_attn.k_proj.weight" => s,
+      "svd.V.model.layers.26.self_attn.k_proj.weight" => v
+    })
+
+    Safetensors.write!(scales_path, %{
+      "svf.scale_offsets.model.layers.26.self_attn.k_proj.weight" => offsets
+    })
+
+    Safetensors.write!(head_path, %{"trinity.router_head.linear.weight" => head})
+
+    File.write!(
+      manifest_path,
+      Jason.encode!(%{
+        "format" => "trinity_sakana_safetensors_export",
+        "components_path" => Path.basename(components_path),
+        "scale_offsets_path" => Path.basename(scales_path),
+        "router_head_path" => Path.basename(head_path),
+        "source_vector_sha256" => "synthetic",
+        "selected_tensors" => [
+          %{
+            "source_name" => "model.layers.26.self_attn.k_proj.weight",
+            "elixir_name" => "decoder.blocks.26.self_attention.key.kernel",
+            "shape" => [2, 2],
+            "singular_values" => 2,
+            "offset_start" => 0,
+            "offset_end" => 2
+          }
+        ]
+      })
+    )
+
+    spec = synthetic_spec(out_dir, 2)
+
+    assert {:ok, manifest} =
+             PythonImporter.import_bundle(
+               source_dir: source_dir,
+               manifest: Path.basename(manifest_path),
+               out_dir: out_dir,
+               force: true,
+               load_qwen: false,
+               spec: spec
+             )
+
+    tensors = Artifact.load_adapted_tensors!(out_dir, manifest: manifest)
+    adapted = Map.fetch!(tensors, "decoder.blocks.26.self_attention.key.kernel")
+
+    source_oriented = Nx.tensor([[0.0, 1.0], [-2.0, 0.0]], type: :f32)
+    target_oriented = Nx.transpose(source_oriented)
+
+    assert_all_close(adapted, target_oriented, atol: 1.0e-6)
+    refute_all_close(adapted, source_oriented, atol: 1.0e-6)
+  end
+
   defp synthetic_spec(out_dir, scale_count) do
     %ExportSpec{
       name: :synthetic_python_import,
