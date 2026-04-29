@@ -46,7 +46,8 @@ The implementation order is:
 2. canonical Python semantic bundle import - complete;
 3. adapted Qwen coordinator profile validation - complete;
 4. fixed-transcript router trace parity - complete;
-5. runtime service loop with trace persistence and provider adapters.
+5. runtime service loop with trace persistence and provider adapters - complete
+   for the mock-provider smoke lane.
 
 Router trace parity is now the gate that caught the square k/v orientation bug:
 the adapted profile loaded and emitted logits, but Python and Elixir disagreed
@@ -87,10 +88,55 @@ have a defensible interpretation when this order is explicit.
 
 Build service ergonomics:
 
-- add a runnable service/demo command for the adapted coordinator;
+- add a runnable service/demo command for the adapted coordinator - complete
+  through `mix trinity.route.demo`;
 - keep model loading warm across requests;
 - expose route diagnostics without dumping sensitive prompt content by default;
 - provide a minimal config story for CUDA, profile, provider pool, and budgets.
+
+## Runtime Loop Status
+
+The adapted runtime loop now carries the Python-compatible control state:
+
+- a thinker can return `<suggestion>...</suggestion>` plus
+  `<suggested_role>solver</suggested_role>` or
+  `<suggested_role>verifier</suggested_role>`;
+- the suggested role overrides exactly one subsequent route;
+- raw route role and effective route role are both recorded in trace events;
+- verifier selection before any Worker/assistant response terminates explicitly
+  before provider dispatch;
+- max-turn exhaustion returns the latest Worker response when one exists;
+- provider failures are traced and returned as errors.
+
+Safe mock-provider smoke:
+
+```bash
+XLA_TARGET=cuda12 mix trinity.hitl.mock_loop \
+  --artifact-dir tmp/sakana_parity/adapted_artifacts_from_python \
+  --trace-out tmp/trinity_mock_trace.jsonl
+```
+
+Operator demo in mock mode:
+
+```bash
+XLA_TARGET=cuda12 mix trinity.route.demo \
+  --mock \
+  --artifact-dir tmp/sakana_parity/adapted_artifacts_from_python \
+  --trace-out tmp/trinity_route_demo.jsonl
+```
+
+Live provider demo mode is intentionally gated:
+
+```bash
+TRINITY_ENABLE_PROVIDER_DEMO=1 XLA_TARGET=cuda12 mix trinity.route.demo \
+  --profile qwen_sakana_adapted \
+  --provider-pool configured \
+  --artifact-dir tmp/sakana_parity/adapted_artifacts_from_python \
+  --trace-out tmp/trinity_route_demo.jsonl
+```
+
+Without `--mock`, `--allow-live`, or `TRINITY_ENABLE_PROVIDER_DEMO=1`, the demo
+fails before loading the model or dispatching to any provider.
 
 Persist traces:
 

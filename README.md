@@ -73,6 +73,11 @@ Working now:
   router-head hash, and argmax agent/role ids. Hidden/logit vectors are compared
   with declared alignment thresholds because Python currently runs this trace on
   CPU while Elixir runs Qwen through EXLA CUDA.
+- The adapted runtime loop can route through fake providers with persisted JSONL
+  traces. The safe smoke path dispatches Worker first, Verifier second, and
+  terminates on verifier `ACCEPT`.
+- Thinker suggestions, verifier-before-worker failure, max-turn latest-worker
+  termination, and provider failure tracing are covered by focused tests.
 
 Current parity result:
 
@@ -319,6 +324,36 @@ The intended service path is:
 
 Provider LLM integration is still being hardened. Tests verify the router and
 provider boundary without pretending that external LLM calls happened.
+
+Run the adapted mock-provider loop:
+
+```bash
+XLA_TARGET=cuda12 mix trinity.hitl.mock_loop \
+  --artifact-dir tmp/sakana_parity/adapted_artifacts_from_python \
+  --trace-out tmp/trinity_mock_trace.jsonl
+```
+
+Run the safe route demo:
+
+```bash
+XLA_TARGET=cuda12 mix trinity.route.demo \
+  --mock \
+  --artifact-dir tmp/sakana_parity/adapted_artifacts_from_python \
+  --trace-out tmp/trinity_route_demo.jsonl
+```
+
+Live provider mode is explicitly gated:
+
+```bash
+TRINITY_ENABLE_PROVIDER_DEMO=1 XLA_TARGET=cuda12 mix trinity.route.demo \
+  --profile qwen_sakana_adapted \
+  --provider-pool configured \
+  --artifact-dir tmp/sakana_parity/adapted_artifacts_from_python \
+  --trace-out tmp/trinity_route_demo.jsonl
+```
+
+Without `--mock`, `--allow-live`, or `TRINITY_ENABLE_PROVIDER_DEMO=1`, live
+provider demo mode fails before dispatch.
 
 ## Quality Standard
 

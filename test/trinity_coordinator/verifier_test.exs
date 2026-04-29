@@ -48,4 +48,14 @@ defmodule TrinityCoordinator.VerifierTest do
     assert Verifier.safe_status(parsed) == :revised
     refute Verifier.accepted?("Verifier", "looks okay maybe")
   end
+
+  test "acceptance must be a leading status token" do
+    for text <- ["I ACCEPT this", "ACCEPTED", "not ACCEPT", "status: ACCEPT"] do
+      parsed = Verifier.parse(text)
+
+      assert parsed.status == :unknown
+      assert Verifier.safe_status(parsed) == :revised
+      refute Verifier.accepted?("Verifier", text)
+    end
+  end
 end

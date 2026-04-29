@@ -29,7 +29,11 @@ defmodule TrinityCoordinator.OrchestratorMockTest do
       {:ok, "ACCEPT: smoke-test verifier accepted."}
     end
 
-    {:ok, pid} = StateManager.start_link([%{role: "user", content: "check this"}])
+    {:ok, pid} =
+      StateManager.start_link([
+        %{role: "user", content: "check this"},
+        %{role: "assistant", content: "Candidate answer ready for verification."}
+      ])
 
     assert {:ok, "ACCEPT: smoke-test verifier accepted."} =
              Orchestrator.run_loop(pid, model, params,
@@ -74,7 +78,7 @@ defmodule TrinityCoordinator.OrchestratorMockTest do
 
     {:ok, pid} = StateManager.start_link([%{role: "user", content: "do work"}])
 
-    assert {:error, :max_turns_reached} =
+    assert {:ok, "Result: one worker turn."} =
              Orchestrator.run_loop(pid, model, params,
                max_turns: 1,
                num_agents: num_agents,
@@ -86,6 +90,210 @@ defmodule TrinityCoordinator.OrchestratorMockTest do
              )
 
     assert :counters.get(counter, 1) == 1
+  end
+
+  test "thinker suggestion overrides the next raw route and max turns returns latest worker result" do
+    input_dim = 4
+    num_agents = 1
+    num_roles = 3
+
+    model = CoordinationHead.build_model(input_dim, num_agents, num_roles)
+    {init_fn, _predict_fn} = Axon.build(model)
+    params = init_fn.(Nx.template({1, input_dim}, :f32), Axon.ModelState.empty())
+    params = force_role_bias(params, [0.0, 0.0, 10.0, 0.0])
+
+    extractor_fn = fn _messages ->
+      %{
+        vector: Nx.broadcast(0.0, {1, input_dim}),
+        vector_shape: {1, input_dim},
+        hidden_state_shape: {1, 2, input_dim},
+        input_shapes: %{}
+      }
+    end
+
+    parent = self()
+
+    mock_agent_fn = fn
+      :thinker, _messages, _metadata ->
+        send(parent, {:role_called, :thinker})
+
+        {:ok,
+         """
+         <suggestion>Ask the solver for the concrete answer.</suggestion>
+         <suggested_role>solver</suggested_role>
+         """}
+
+      :worker, _messages, _metadata ->
+        send(parent, {:role_called, :worker})
+        {:ok, "Result: suggested worker produced 42."}
+    end
+
+    trace_path =
+      Path.join(System.tmp_dir!(), "trinity_thinker_#{System.unique_integer([:positive])}.jsonl")
+
+    on_exit(fn -> File.rm(trace_path) end)
+
+    {:ok, pid} = StateManager.start_link([%{role: "user", content: "solve"}])
+
+    assert {:ok, "Result: suggested worker produced 42."} =
+             Orchestrator.run_loop(pid, model, params,
+               max_turns: 2,
+               num_agents: num_agents,
+               num_roles: num_roles,
+               slm_context: :mock_context,
+               extractor_fn: extractor_fn,
+               mock_agent_fn: mock_agent_fn,
+               provider_pool: :mock,
+               trace: [enabled: true, sink: {:jsonl, trace_path}, run_id: "thinker_unit"]
+             )
+
+    assert_receive {:role_called, :thinker}
+    assert_receive {:role_called, :worker}
+
+    route_events =
+      trace_path
+      |> File.read!()
+      |> String.split("\n", trim: true)
+      |> Enum.map(&Jason.decode!/1)
+      |> Enum.filter(&(&1["event"] == "route_selected"))
+
+    assert Enum.map(route_events, & &1["selected_role"]) == ["Thinker", "Worker"]
+
+    override_event = Enum.at(route_events, 1)
+    assert override_event["role_override_from_thinker"] == true
+    assert override_event["raw_selected_role"] == "Thinker"
+  end
+
+  test "verifier before any worker response terminates explicitly without dispatch" do
+    input_dim = 4
+    num_agents = 1
+    num_roles = 3
+
+    model = CoordinationHead.build_model(input_dim, num_agents, num_roles)
+    {init_fn, _predict_fn} = Axon.build(model)
+    params = init_fn.(Nx.template({1, input_dim}, :f32), Axon.ModelState.empty())
+    params = force_role_bias(params, [0.0, 0.0, 0.0, 10.0])
+
+    extractor_fn = fn _messages ->
+      %{
+        vector: Nx.broadcast(0.0, {1, input_dim}),
+        vector_shape: {1, input_dim},
+        hidden_state_shape: {1, 2, input_dim},
+        input_shapes: %{}
+      }
+    end
+
+    mock_agent_fn = fn _role, _messages, _metadata ->
+      flunk("verifier-before-worker must not dispatch a provider")
+    end
+
+    trace_path =
+      Path.join(
+        System.tmp_dir!(),
+        "trinity_early_verifier_#{System.unique_integer([:positive])}.jsonl"
+      )
+
+    on_exit(fn -> File.rm(trace_path) end)
+
+    {:ok, pid} = StateManager.start_link([%{role: "user", content: "check"}])
+
+    assert {:error, :verifier_before_worker_response} =
+             Orchestrator.run_loop(pid, model, params,
+               max_turns: 3,
+               num_agents: num_agents,
+               num_roles: num_roles,
+               slm_context: :mock_context,
+               extractor_fn: extractor_fn,
+               mock_agent_fn: mock_agent_fn,
+               provider_pool: :mock,
+               trace: [enabled: true, sink: {:jsonl, trace_path}, run_id: "early_verifier_unit"]
+             )
+
+    events =
+      trace_path
+      |> File.read!()
+      |> String.split("\n", trim: true)
+      |> Enum.map(&Jason.decode!/1)
+
+    assert Enum.any?(
+             events,
+             &(&1["event"] == "route_selected" and &1["selected_role"] == "Verifier")
+           )
+
+    assert Enum.any?(
+             events,
+             &(&1["event"] == "run_failed" and &1["reason"] == "verifier_before_worker_response")
+           )
+
+    refute Enum.any?(
+             events,
+             &(&1["event"] == "provider_called" and &1["status"] in ["started", "ok"])
+           )
+  end
+
+  test "provider failure is traced and never becomes a successful pass" do
+    input_dim = 4
+    num_agents = 1
+    num_roles = 3
+
+    model = CoordinationHead.build_model(input_dim, num_agents, num_roles)
+    {init_fn, _predict_fn} = Axon.build(model)
+    params = init_fn.(Nx.template({1, input_dim}, :f32), Axon.ModelState.empty())
+    params = force_role_bias(params, [0.0, 10.0, 0.0, 0.0])
+
+    extractor_fn = fn _messages ->
+      %{
+        vector: Nx.broadcast(0.0, {1, input_dim}),
+        vector_shape: {1, input_dim},
+        hidden_state_shape: {1, 2, input_dim},
+        input_shapes: %{}
+      }
+    end
+
+    mock_agent_fn = fn :worker, _messages, _metadata -> {:error, :mock_provider_failed} end
+
+    trace_path =
+      Path.join(
+        System.tmp_dir!(),
+        "trinity_provider_error_#{System.unique_integer([:positive])}.jsonl"
+      )
+
+    on_exit(fn -> File.rm(trace_path) end)
+
+    {:ok, pid} = StateManager.start_link([%{role: "user", content: "do work"}])
+
+    assert {:error, :mock_provider_failed} =
+             Orchestrator.run_loop(pid, model, params,
+               max_turns: 1,
+               num_agents: num_agents,
+               num_roles: num_roles,
+               slm_context: :mock_context,
+               extractor_fn: extractor_fn,
+               mock_agent_fn: mock_agent_fn,
+               provider_pool: :mock,
+               trace: [enabled: true, sink: {:jsonl, trace_path}, run_id: "provider_error_unit"]
+             )
+
+    events =
+      trace_path
+      |> File.read!()
+      |> String.split("\n", trim: true)
+      |> Enum.map(&Jason.decode!/1)
+
+    assert Enum.any?(events, &(&1["event"] == "provider_called" and &1["status"] == "started"))
+
+    error_event =
+      Enum.find(events, &(&1["event"] == "provider_called" and &1["status"] == "error"))
+
+    assert is_map(error_event)
+    assert is_integer(error_event["provider_latency_ms"])
+
+    assert Enum.any?(
+             events,
+             &(&1["event"] == "run_failed" and &1["reason"] == "mock_provider_failed")
+           )
+
+    refute Enum.any?(events, &(&1["event"] == "run_completed"))
   end
 
   test "default runtime role order preserves imported Python checkpoint order" do
@@ -116,7 +324,7 @@ defmodule TrinityCoordinator.OrchestratorMockTest do
 
     {:ok, pid} = StateManager.start_link([%{role: "user", content: "do work"}])
 
-    assert {:error, :max_turns_reached} =
+    assert {:ok, "raw role 0 reached Worker/solver compatibility path"} =
              Orchestrator.run_loop(pid, model, params,
                max_turns: 1,
                num_agents: num_agents,
@@ -157,7 +365,11 @@ defmodule TrinityCoordinator.OrchestratorMockTest do
 
     on_exit(fn -> File.rm(trace_path) end)
 
-    {:ok, pid} = StateManager.start_link([%{role: "user", content: "check this"}])
+    {:ok, pid} =
+      StateManager.start_link([
+        %{role: "user", content: "check this"},
+        %{role: "assistant", content: "Candidate answer ready for trace verification."}
+      ])
 
     assert {:ok, _} =
              Orchestrator.run_loop(pid, model, params,
@@ -192,6 +404,7 @@ defmodule TrinityCoordinator.OrchestratorMockTest do
     assert provider_event["provider_mode"] == "mock"
     assert provider_event["mock"] == true
     assert provider_event["selected_role_name"] == "Verifier"
+    assert is_integer(provider_event["provider_latency_ms"])
 
     turn_event = Enum.find(events, &(&1["event"] == "turn_completed"))
     assert turn_event["verifier_parse_status"] == "accepted"

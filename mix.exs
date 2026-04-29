@@ -123,6 +123,8 @@ defmodule TrinityCoordinator.MixProject do
           TrinityCoordinator.Runtime,
           TrinityCoordinator.StateManager,
           TrinityCoordinator.RoleInjector,
+          TrinityCoordinator.Thinker,
+          TrinityCoordinator.Verifier,
           TrinityCoordinator.AgentPool,
           TrinityCoordinator.AgentPool.Adapter,
           TrinityCoordinator.AgentPool.OpenAI

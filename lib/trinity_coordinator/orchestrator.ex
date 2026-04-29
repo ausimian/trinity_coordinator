@@ -14,6 +14,7 @@ defmodule TrinityCoordinator.Orchestrator do
     RoleInjector,
     Runtime,
     StateManager,
+    Thinker,
     Trace,
     Verifier
   }
@@ -67,7 +68,8 @@ defmodule TrinityCoordinator.Orchestrator do
       num_roles: num_roles,
       mock_agent_fn: Keyword.get(opts, :mock_agent_fn),
       extractor_fn: Keyword.get(opts, :extractor_fn),
-      route_opts: Keyword.get(opts, :route_opts, [])
+      route_opts: Keyword.get(opts, :route_opts, []),
+      respect_thinker_suggestions: Keyword.get(opts, :respect_thinker_suggestions, true)
     }
 
     runtime_metadata = build_runtime_metadata(opts[:slm_context])
@@ -88,13 +90,13 @@ defmodule TrinityCoordinator.Orchestrator do
 
         do_run_loop(
           pid,
-          model,
-          params,
+          {model, params},
           0,
           max_turns,
           slm_context,
           run_ctx,
-          trace
+          trace,
+          initial_loop_state(pid)
         )
 
       error ->
@@ -136,13 +138,53 @@ defmodule TrinityCoordinator.Orchestrator do
     end
   end
 
-  defp do_run_loop(_pid, _model, _params, turn, max_turns, _slm_context, _run_ctx, trace)
-       when turn >= max_turns do
-    emit_trace(trace, :run_failed, %{reason: :max_turns_reached})
-    {:error, :max_turns_reached}
+  defp initial_loop_state(pid) do
+    %{
+      latest_worker_response: latest_assistant_response(pid),
+      suggested_role: nil,
+      suggested_role_id: nil,
+      suggestion: nil
+    }
   end
 
-  defp do_run_loop(pid, model, params, turn, max_turns, slm_context, run_ctx, trace) do
+  defp latest_assistant_response(pid) do
+    pid
+    |> StateManager.get_messages()
+    |> Enum.reverse()
+    |> Enum.find_value(fn
+      %{role: "assistant", content: content} when is_binary(content) -> content
+      _ -> nil
+    end)
+  end
+
+  defp do_run_loop(_pid, _routing, turn, max_turns, _slm_context, _run_ctx, trace, state)
+       when turn >= max_turns do
+    case state.latest_worker_response do
+      response_text when is_binary(response_text) ->
+        emit_trace(trace, :run_completed, %{
+          turn: turn,
+          final_status: :max_turns_latest_worker_response,
+          response_hash: Trace.Hash.text(response_text)
+        })
+
+        {:ok, response_text}
+
+      _ ->
+        emit_trace(trace, :run_failed, %{reason: :max_turns_reached})
+        {:error, :max_turns_reached}
+    end
+  end
+
+  defp do_run_loop(
+         pid,
+         {model, params} = routing,
+         turn,
+         max_turns,
+         slm_context,
+         run_ctx,
+         trace,
+         state
+       ) do
     messages = StateManager.get_messages(pid)
     transcript_hash = Trace.Hash.messages(messages)
 
@@ -163,15 +205,18 @@ defmodule TrinityCoordinator.Orchestrator do
              run_ctx.num_agents,
              run_ctx.num_roles,
              run_ctx.route_opts
-           ),
+           )
+           |> apply_thinker_suggestion(run_ctx, state),
          :ok <- emit_route_trace(trace, route, extraction.vector, run_ctx.roles, turn),
          role_name = role_name_for(run_ctx.roles, route.role_id),
          role_atom = RoleInjector.role_atom(role_name),
+         :ok <- ensure_role_dispatch_allowed(role_atom, state),
+         state_for_turn <- clear_consumed_suggestion(state, route),
          injected_messages <- RoleInjector.inject_role(messages, role_name),
          {:ok, dispatch_started} <-
            emit_dispatch_started(trace, turn, run_ctx, route, role_name),
          {:ok, dispatch} <-
-           dispatch_agent(
+           dispatch_agent_timed(
              run_ctx.mock_agent_fn,
              role_atom,
              role_name,
@@ -192,6 +237,8 @@ defmodule TrinityCoordinator.Orchestrator do
 
       verifier_status = Verifier.safe_status(verifier_result)
       accepted? = verifier_status == :accepted
+      thinker_result = maybe_parse_thinker(role_atom, response_text)
+      next_state = update_loop_state(state_for_turn, role_atom, response_text, thinker_result)
 
       emit_trace(
         trace,
@@ -201,6 +248,7 @@ defmodule TrinityCoordinator.Orchestrator do
           provider: dispatch.provider,
           provider_model: dispatch.provider_model,
           provider_mode: dispatch.mode,
+          provider_latency_ms: dispatch.provider_latency_ms,
           mock: dispatch.mode == :mock,
           selected_agent: route.agent_id,
           selected_role: route.role_id,
@@ -220,6 +268,7 @@ defmodule TrinityCoordinator.Orchestrator do
         provider: dispatch.provider,
         provider_model: dispatch.provider_model,
         provider_mode: dispatch.mode,
+        provider_latency_ms: dispatch.provider_latency_ms,
         mock: dispatch.mode == :mock,
         response_hash: Trace.Hash.text(response_text),
         selected_agent_logits: Nx.to_flat_list(route.agent_logits),
@@ -231,6 +280,11 @@ defmodule TrinityCoordinator.Orchestrator do
         verifier_parse_status: verifier_result.status,
         verifier_status: verifier_status,
         verifier_diagnosis_hash: diagnosis_hash(verifier_result),
+        thinker_suggested_role: suggested_role_for_trace(thinker_result),
+        thinker_suggestion_hash: suggestion_hash(thinker_result),
+        raw_selected_role_id: Map.get(route, :raw_role_id, route.role_id),
+        raw_selected_role: Map.get(route, :raw_role_name, role_name),
+        role_override_from_thinker: Map.get(route, :role_override_from_thinker, false),
         final: accepted?
       })
 
@@ -243,9 +297,39 @@ defmodule TrinityCoordinator.Orchestrator do
 
         {:ok, response_text}
       else
-        do_run_loop(pid, model, params, turn + 1, max_turns, slm_context, run_ctx, trace)
+        do_run_loop(
+          pid,
+          routing,
+          turn + 1,
+          max_turns,
+          slm_context,
+          run_ctx,
+          trace,
+          next_state
+        )
       end
     else
+      {:error, :verifier_before_worker_response} ->
+        emit_trace(trace, :run_failed, %{turn: turn, reason: :verifier_before_worker_response})
+        {:error, :verifier_before_worker_response}
+
+      {:error, {:provider_dispatch_failed, reason, provider_latency_ms}} ->
+        emit_trace(
+          trace,
+          :provider_called,
+          %{
+            turn: turn,
+            provider_mode: if(run_ctx.mock_agent_fn, do: :mock, else: :live),
+            provider_latency_ms: provider_latency_ms,
+            mock: not is_nil(run_ctx.mock_agent_fn),
+            status: :error,
+            error: inspect(reason)
+          }
+        )
+
+        emit_trace(trace, :run_failed, %{turn: turn, reason: reason})
+        {:error, reason}
+
       {:error, reason} ->
         emit_trace(
           trace,
@@ -268,11 +352,98 @@ defmodule TrinityCoordinator.Orchestrator do
     end
   end
 
+  defp dispatch_agent_timed(mock_fn, role_atom, role_name, messages, agent_id, opts, pool) do
+    start_time = System.monotonic_time(:millisecond)
+
+    case dispatch_agent(mock_fn, role_atom, role_name, messages, agent_id, opts, pool) do
+      {:ok, dispatch} ->
+        {:ok, Map.put(dispatch, :provider_latency_ms, elapsed_ms(start_time))}
+
+      {:error, reason} ->
+        {:error, {:provider_dispatch_failed, reason, elapsed_ms(start_time)}}
+    end
+  end
+
+  defp elapsed_ms(start_time), do: max(System.monotonic_time(:millisecond) - start_time, 0)
+
   defp role_name_for(roles, role_id) when is_map(roles) do
     roles
     |> Map.get(role_id, "Worker")
     |> RoleInjector.role_name()
   end
+
+  defp apply_thinker_suggestion(route, %{respect_thinker_suggestions: true, roles: roles}, %{
+         suggested_role: role_name,
+         suggested_role_id: role_id,
+         suggestion: suggestion
+       })
+       when is_binary(role_name) and is_integer(role_id) do
+    route
+    |> annotate_raw_role(roles)
+    |> Map.put(:role_id, role_id)
+    |> Map.put(:role_override_from_thinker, true)
+    |> Map.put(:role_override_suggestion_hash, Trace.Hash.text(suggestion || ""))
+  end
+
+  defp apply_thinker_suggestion(route, %{roles: roles}, _state) do
+    route
+    |> annotate_raw_role(roles)
+    |> Map.put(:role_override_from_thinker, false)
+  end
+
+  defp annotate_raw_role(route, roles) do
+    raw_role_id = Map.get(route, :raw_role_id, route.role_id)
+
+    route
+    |> Map.put_new(:raw_role_id, raw_role_id)
+    |> Map.put_new(:raw_role_name, role_name_for(roles, raw_role_id))
+  end
+
+  defp ensure_role_dispatch_allowed(:verifier, %{latest_worker_response: nil}) do
+    {:error, :verifier_before_worker_response}
+  end
+
+  defp ensure_role_dispatch_allowed(_role, _state), do: :ok
+
+  defp clear_consumed_suggestion(state, %{role_override_from_thinker: true}) do
+    %{state | suggested_role: nil, suggested_role_id: nil, suggestion: nil}
+  end
+
+  defp clear_consumed_suggestion(state, _route), do: state
+
+  defp maybe_parse_thinker(:thinker, response_text), do: Thinker.parse(response_text)
+  defp maybe_parse_thinker(_role, _response_text), do: nil
+
+  defp update_loop_state(state, :worker, response_text, _thinker_result) do
+    %{
+      state
+      | latest_worker_response: response_text,
+        suggested_role: nil,
+        suggested_role_id: nil,
+        suggestion: nil
+    }
+  end
+
+  defp update_loop_state(state, :thinker, _response_text, %Thinker{} = thinker_result) do
+    %{
+      state
+      | suggested_role: thinker_result.suggested_role,
+        suggested_role_id: thinker_result.suggested_role_id,
+        suggestion: thinker_result.suggestion
+    }
+  end
+
+  defp update_loop_state(state, _role, _response_text, _thinker_result) do
+    %{state | suggested_role: nil, suggested_role_id: nil, suggestion: nil}
+  end
+
+  defp suggested_role_for_trace(%Thinker{suggested_role: role}), do: role
+  defp suggested_role_for_trace(_), do: nil
+
+  defp suggestion_hash(%Thinker{suggestion: suggestion}) when is_binary(suggestion),
+    do: Trace.Hash.text(suggestion)
+
+  defp suggestion_hash(_), do: nil
 
   defp emit_dispatch_started(trace, turn, run_ctx, route, role_name) do
     case dispatch_preview(
@@ -410,6 +581,8 @@ defmodule TrinityCoordinator.Orchestrator do
   end
 
   defp emit_route_trace(trace, route, vector, roles, turn) do
+    raw_role_id = Map.get(route, :raw_role_id, route.role_id)
+
     emit_trace(trace, :route_selected, %{
       turn: turn,
       logits: Nx.to_flat_list(Nx.squeeze(route.logits, axes: [0])),
@@ -422,6 +595,10 @@ defmodule TrinityCoordinator.Orchestrator do
       selected_agent: route.agent_id,
       selected_role: role_name_for(roles, route.role_id),
       selected_role_id: route.role_id,
+      raw_selected_role: Map.get(route, :raw_role_name, role_name_for(roles, raw_role_id)),
+      raw_selected_role_id: raw_role_id,
+      role_override_from_thinker: Map.get(route, :role_override_from_thinker, false),
+      role_override_suggestion_hash: Map.get(route, :role_override_suggestion_hash),
       agent_selection_mode: Map.get(route, :agent_selection_mode, :argmax),
       role_selection_mode: Map.get(route, :role_selection_mode, :argmax),
       selection_temperature: Map.get(route, :selection_temperature),

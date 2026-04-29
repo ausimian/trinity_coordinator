@@ -12,7 +12,7 @@ XLA_TARGET=cuda12 mix test
 Current expected result:
 
 ```text
-1 doctest, 163 tests, 0 failures, 25 excluded
+1 doctest, 170 tests, 0 failures, 25 excluded
 ```
 
 The excluded tests include slow Qwen/SVD gates and expensive artifact export
@@ -182,6 +182,46 @@ XLA_TARGET=cuda12 mix test test/trinity_coordinator/sakana/svd_test.exs \
 
 These are not part of every local commit loop.
 
+Adapted runtime mock loop:
+
+```bash
+XLA_TARGET=cuda12 mix trinity.hitl.mock_loop \
+  --artifact-dir tmp/sakana_parity/adapted_artifacts_from_python \
+  --trace-out tmp/trinity_mock_trace.jsonl
+```
+
+Expected high-level result:
+
+```text
+Mock turn 1: role=:worker agent_id=4
+Mock turn 2: role=:verifier agent_id=4
+Termination: accepted
+PASS
+```
+
+Safe route demo:
+
+```bash
+XLA_TARGET=cuda12 mix trinity.route.demo \
+  --mock \
+  --artifact-dir tmp/sakana_parity/adapted_artifacts_from_python \
+  --trace-out tmp/trinity_route_demo.jsonl
+```
+
+Live provider route demo is credential-gated and should be run only with an
+explicit configured provider pool:
+
+```bash
+TRINITY_ENABLE_PROVIDER_DEMO=1 XLA_TARGET=cuda12 mix trinity.route.demo \
+  --profile qwen_sakana_adapted \
+  --provider-pool configured \
+  --artifact-dir tmp/sakana_parity/adapted_artifacts_from_python \
+  --trace-out tmp/trinity_route_demo.jsonl
+```
+
+Provider errors fail the command; they are not converted into successful smoke
+results.
+
 ## Expected XLA Warnings
 
 EXLA/CUDA may print:
@@ -206,6 +246,7 @@ SVD compilation path. For the fastest sample parity loop, pair it with
 - [ ] `mix credo --strict`
 - [ ] `mix dialyzer`
 - [ ] `mix docs`
+- [ ] `XLA_TARGET=cuda12 mix trinity.hitl.mock_loop --artifact-dir tmp/sakana_parity/adapted_artifacts_from_python --trace-out tmp/trinity_mock_trace.jsonl`
 - [ ] parity runtime check when parity code changed:
   `compare_sakana_parity_reports.py --strict-stage-tolerances`
 - [ ] README and guides updated when behavior or standards change.

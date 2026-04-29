@@ -14,7 +14,13 @@ defmodule TrinityCoordinator.Training.EvaluatorMockTest do
     params = force_role_bias(params, [0.0, 0.0, 0.0, 10.0])
 
     tasks = [
-      %{id: :mock_task, messages: [%{"role" => "user", "content" => "verify"}]}
+      %{
+        id: :mock_task,
+        messages: [
+          %{"role" => "user", "content" => "verify"},
+          %{"role" => "assistant", "content" => "Candidate answer ready for verifier."}
+        ]
+      }
     ]
 
     extractor_fn = fn _messages, _slm_context ->
