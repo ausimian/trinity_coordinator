@@ -107,6 +107,8 @@ The adapted runtime loop now carries the Python-compatible control state:
   before provider dispatch;
 - max-turn exhaustion returns the latest Worker response when one exists;
 - provider failures are traced and returned as errors.
+- reviewer examples in `examples/` show both direct local routing and mocked
+  orchestration against the adapted artifacts.
 
 Safe mock-provider smoke:
 
@@ -137,6 +139,24 @@ TRINITY_ENABLE_PROVIDER_DEMO=1 XLA_TARGET=cuda12 mix trinity.route.demo \
 
 Without `--mock`, `--allow-live`, or `TRINITY_ENABLE_PROVIDER_DEMO=1`, the demo
 fails before loading the model or dispatching to any provider.
+
+Reviewer examples:
+
+```bash
+XLA_TARGET=cuda12 mix run examples/local_coordinator_route.exs -- \
+  --artifact-dir tmp/sakana_parity/adapted_artifacts_from_python
+```
+
+```bash
+XLA_TARGET=cuda12 mix run examples/mock_orchestration_trace.exs -- \
+  --artifact-dir tmp/sakana_parity/adapted_artifacts_from_python \
+  --trace-out tmp/examples/mock_orchestration_trace.jsonl
+```
+
+These are the preferred inspection tools for the current state because they
+print prompt input, artifact identity, extraction metadata, route logits,
+selected roles, provider-boundary status, and trace summaries without making
+live provider calls.
 
 Persist traces:
 

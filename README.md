@@ -120,8 +120,11 @@ Read the guides in this order:
 6. [Sakana Artifacts And Export](guides/artifacts_and_export.md)
 7. [SVD Generation Runbook](guides/svd_generation_runbook.md)
 8. [Service Buildout Plan](guides/service_buildout.md)
-9. [Operations And Quality Gates](guides/operations_qc.md)
-10. [Troubleshooting](guides/troubleshooting.md)
+9. [Provider Service Hardening](guides/provider_service_hardening.md)
+10. [Operations And Quality Gates](guides/operations_qc.md)
+11. [Troubleshooting](guides/troubleshooting.md)
+
+Runnable reviewer examples are in [Examples](examples/README.md).
 
 Additional technical reference notes are included in HexDocs under
 `Reference Notes`.
@@ -354,6 +357,30 @@ TRINITY_ENABLE_PROVIDER_DEMO=1 XLA_TARGET=cuda12 mix trinity.route.demo \
 
 Without `--mock`, `--allow-live`, or `TRINITY_ENABLE_PROVIDER_DEMO=1`, live
 provider demo mode fails before dispatch.
+
+## Examples
+
+The `examples/` directory contains runnable, no-provider reviewer diagnostics.
+
+Local coordinator routing:
+
+```bash
+XLA_TARGET=cuda12 mix run examples/local_coordinator_route.exs -- \
+  --artifact-dir tmp/sakana_parity/adapted_artifacts_from_python \
+  --prompt "Select a TRINITY role for this reasoning task."
+```
+
+Mock orchestration trace:
+
+```bash
+XLA_TARGET=cuda12 mix run examples/mock_orchestration_trace.exs -- \
+  --artifact-dir tmp/sakana_parity/adapted_artifacts_from_python \
+  --prompt "Select a TRINITY role for this reasoning task." \
+  --trace-out tmp/examples/mock_orchestration_trace.jsonl
+```
+
+These examples print the prompt, artifact identity, hidden/vector/logit shapes,
+selected agent/role ids, mock provider turns, and trace summaries.
 
 ## Quality Standard
 

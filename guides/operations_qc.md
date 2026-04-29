@@ -222,6 +222,22 @@ TRINITY_ENABLE_PROVIDER_DEMO=1 XLA_TARGET=cuda12 mix trinity.route.demo \
 Provider errors fail the command; they are not converted into successful smoke
 results.
 
+Reviewer examples:
+
+```bash
+XLA_TARGET=cuda12 mix run examples/local_coordinator_route.exs -- \
+  --artifact-dir tmp/sakana_parity/adapted_artifacts_from_python
+```
+
+```bash
+XLA_TARGET=cuda12 mix run examples/mock_orchestration_trace.exs -- \
+  --artifact-dir tmp/sakana_parity/adapted_artifacts_from_python \
+  --trace-out tmp/examples/mock_orchestration_trace.jsonl
+```
+
+Both examples should print detailed local coordinator evidence and complete
+without live provider credentials.
+
 ## Expected XLA Warnings
 
 EXLA/CUDA may print:
@@ -247,6 +263,8 @@ SVD compilation path. For the fastest sample parity loop, pair it with
 - [ ] `mix dialyzer`
 - [ ] `mix docs`
 - [ ] `XLA_TARGET=cuda12 mix trinity.hitl.mock_loop --artifact-dir tmp/sakana_parity/adapted_artifacts_from_python --trace-out tmp/trinity_mock_trace.jsonl`
+- [ ] `XLA_TARGET=cuda12 mix run examples/local_coordinator_route.exs -- --artifact-dir tmp/sakana_parity/adapted_artifacts_from_python`
+- [ ] `XLA_TARGET=cuda12 mix run examples/mock_orchestration_trace.exs -- --artifact-dir tmp/sakana_parity/adapted_artifacts_from_python --trace-out tmp/examples/mock_orchestration_trace.jsonl`
 - [ ] parity runtime check when parity code changed:
   `compare_sakana_parity_reports.py --strict-stage-tolerances`
 - [ ] README and guides updated when behavior or standards change.

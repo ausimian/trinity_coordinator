@@ -68,6 +68,7 @@ defmodule TrinityCoordinator.MixProject do
         "CHANGELOG.md",
         "LICENSE",
         "assets",
+        "examples",
         "guides",
         "docs"
       ]
@@ -76,11 +77,12 @@ defmodule TrinityCoordinator.MixProject do
 
   defp docs do
     [
-      main: "readme",
+      main: "overview",
       source_ref: "v#{@version}",
       source_url: "https://github.com/nshkrdotcom/trinity_coordinator",
       extras: [
-        "README.md",
+        {"README.md", [filename: "overview", title: "Overview"]},
+        {"examples/README.md", [filename: "examples", title: "Examples"]},
         "guides/onboarding.md",
         "guides/current_direction.md",
         "guides/system_architecture.md",
@@ -89,6 +91,7 @@ defmodule TrinityCoordinator.MixProject do
         "guides/artifacts_and_export.md",
         "guides/svd_generation_runbook.md",
         "guides/service_buildout.md",
+        "guides/provider_service_hardening.md",
         "guides/operations_qc.md",
         "guides/troubleshooting.md",
         "docs/sakana_svd_byte_match_rigor_plan.md",
@@ -106,10 +109,12 @@ defmodule TrinityCoordinator.MixProject do
       ],
       groups_for_extras: [
         Project: ~r/^(README|CHANGELOG|LICENSE)/,
+        Examples: ~r/examples\/README\.md/,
         "Start Here": ~r/guides\/(onboarding|current_direction|system_architecture)\.md/,
         "Parity Guides":
           ~r/guides\/(python_parity_reconstruction|stage_checks_and_tolerances|artifacts_and_export|svd_generation_runbook)\.md/,
-        "Service Buildout": ~r/guides\/(service_buildout|operations_qc|troubleshooting)\.md/,
+        "Service Buildout":
+          ~r/guides\/(service_buildout|provider_service_hardening|operations_qc|troubleshooting)\.md/,
         "Reference Notes": ~r/docs\//
       ],
       groups_for_modules: [
