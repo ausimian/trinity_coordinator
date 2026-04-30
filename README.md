@@ -468,6 +468,7 @@ The next most useful commands are:
 | --- | --- | --- |
 | `mix trinity.route.demo --mock` | Primary end-to-end smoke: adapted router, mock provider boundary, verifier termination, trace output | Mock only |
 | `mix run examples/local_coordinator_route.exs -- ...` | Inspect tokenization, hidden vector, logits, selected agent, and selected role | None |
+| `mix run examples/qwen_router_prompt_eval.exs` | Eval-style prompt suite that asserts expected Qwen router agent/role choices | None |
 | `mix run examples/mock_orchestration_trace.exs -- ...` | Reviewer-friendly orchestration trace with printed mock turns | Mock only |
 | `mix trinity.hitl.mock_loop` | HITL-style mock orchestrator check | Mock only |
 | `mix trinity.hitl.adapted` | Adapted Qwen shape/logit smoke | None |
@@ -565,6 +566,12 @@ Local coordinator routing:
 XLA_TARGET=cuda12 mix run examples/local_coordinator_route.exs -- \
   --artifact-dir priv/sakana_trinity/adapted_qwen3_0_6b_layer26 \
   --prompt "Select a TRINITY role for this reasoning task."
+```
+
+Qwen router prompt eval:
+
+```bash
+XLA_TARGET=cuda12 mix run examples/qwen_router_prompt_eval.exs
 ```
 
 Mock orchestration trace:
