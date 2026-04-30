@@ -243,23 +243,35 @@ mix deps.get
 XLA_TARGET=cuda12 mix test
 ```
 
-Then verify the adapted local coordinator, assuming the generated artifact
-directory has been installed:
-
-```bash
-XLA_TARGET=cuda12 mix trinity.hitl.adapted \
-  --message "What is 17 + 25? Answer briefly."
-```
-
-This should print the artifact identity, Qwen hidden-vector shape, router logits,
-selected agent id, and selected role name.
-
-Run the safe mock orchestration demo:
+Then run the primary safe demo. This is the first command to use when checking
+that the project works end to end without spending provider budget:
 
 ```bash
 XLA_TARGET=cuda12 mix trinity.route.demo \
   --mock \
   --trace-out tmp/trinity_route_demo.jsonl
+```
+
+This loads the adapted Qwen coordinator from the default artifact path,
+routes through the Sakana head, dispatches to deterministic mock providers,
+persists a JSONL trace, and exits with `TRINITY ROUTE DEMO: PASS` when the
+mock verifier accepts.
+
+If you only want to inspect the local router without provider dispatch, run:
+
+```bash
+XLA_TARGET=cuda12 mix run examples/local_coordinator_route.exs -- \
+  --artifact-dir priv/sakana_trinity/adapted_qwen3_0_6b_layer26 \
+  --prompt "Select a TRINITY role for this reasoning task."
+```
+
+That prints the artifact identity, token ids, hidden-vector shape, route logits,
+selected agent id, and selected role name.
+
+For the direct adapted-coordinator shape smoke:
+
+```bash
+XLA_TARGET=cuda12 mix trinity.hitl.adapted
 ```
 
 Run static checks before committing:
@@ -434,19 +446,56 @@ Provider dispatch now enters the shared `:inference` boundary through
 Manager specs. Live calls are still explicitly gated; tests verify routing and
 provider-boundary behavior without pretending that external LLM calls happened.
 
-Run the adapted mock-provider loop:
+## Running The Router
+
+Use `mix trinity.route.demo --mock` as the primary operator-facing command. It
+exercises the local adapted router, role injection, provider boundary, verifier
+termination, and JSONL trace persistence without external LLM calls:
+
+```bash
+XLA_TARGET=cuda12 mix trinity.route.demo \
+  --mock \
+  --trace-out tmp/trinity_route_demo.jsonl
+```
+
+`mix trinity.demo --mock` is kept as a compatibility wrapper and delegates to
+the same route demo. Prefer `mix trinity.route.demo --mock` in new docs,
+scripts, and smoke checks.
+
+The next most useful commands are:
+
+| Command | Purpose | Provider calls |
+| --- | --- | --- |
+| `mix trinity.route.demo --mock` | Primary end-to-end smoke: adapted router, mock provider boundary, verifier termination, trace output | Mock only |
+| `mix run examples/local_coordinator_route.exs -- ...` | Inspect tokenization, hidden vector, logits, selected agent, and selected role | None |
+| `mix run examples/mock_orchestration_trace.exs -- ...` | Reviewer-friendly orchestration trace with printed mock turns | Mock only |
+| `mix trinity.hitl.mock_loop` | HITL-style mock orchestrator check | Mock only |
+| `mix trinity.hitl.adapted` | Adapted Qwen shape/logit smoke | None |
+| `mix trinity.sakana.router_trace` | Python/Elixir fixed-transcript parity check | None |
+
+All route/demo commands default to the promoted artifact directory:
+
+```text
+priv/sakana_trinity/adapted_qwen3_0_6b_layer26
+```
+
+Use `--artifact-dir ...` only when testing a non-default artifact bundle.
+
+Run the adapted mock-provider HITL loop when you want terse pass/fail output:
 
 ```bash
 XLA_TARGET=cuda12 mix trinity.hitl.mock_loop \
   --trace-out tmp/trinity_mock_trace.jsonl
 ```
 
-Run the safe route demo:
+Run the reviewer-friendly mock orchestration trace when you want a readable
+summary of trace events:
 
 ```bash
-XLA_TARGET=cuda12 mix trinity.route.demo \
-  --mock \
-  --trace-out tmp/trinity_route_demo.jsonl
+XLA_TARGET=cuda12 mix run examples/mock_orchestration_trace.exs -- \
+  --artifact-dir priv/sakana_trinity/adapted_qwen3_0_6b_layer26 \
+  --prompt "Select a TRINITY role for this reasoning task." \
+  --trace-out tmp/examples/mock_orchestration_trace.jsonl
 ```
 
 Live provider mode is explicitly gated:
@@ -455,16 +504,56 @@ Live provider mode is explicitly gated:
 TRINITY_ENABLE_PROVIDER_DEMO=1 XLA_TARGET=cuda12 mix trinity.route.demo \
   --profile qwen_sakana_adapted \
   --provider-pool gemini_cli_asm \
+  --max-turns 3 \
   --trace-out tmp/trinity_route_demo.jsonl
 ```
 
 Without `--mock`, `--allow-live`, or `TRINITY_ENABLE_PROVIDER_DEMO=1`, live
 provider demo mode fails before dispatch.
 
+The built-in default live provider pool maps all seven agent ids to OpenAI
+`gpt-4o-mini` specs. To use it, provide an OpenAI API key and explicitly enable
+live mode:
+
+```bash
+TRINITY_ENABLE_PROVIDER_DEMO=1 OPENAI_API_KEY=... XLA_TARGET=cuda12 \
+  mix trinity.route.demo \
+    --profile qwen_sakana_adapted \
+    --provider-pool default \
+    --max-turns 3 \
+    --trace-out tmp/trinity_route_demo_openai.jsonl
+```
+
 The built-in `gemini_cli_asm` pool routes all seven TRINITY agents through
 `Inference.Adapters.ASM`, ASM's SDK lane, and `gemini_cli_sdk` using
 `gemini-3.1-flash-lite-preview`. The Gemini CLI must be installed or reachable
 through the SDK's `npx` fallback and authenticated in the runtime environment.
+
+### Mix Command Reference
+
+Operator-facing commands:
+
+| Command | Use |
+| --- | --- |
+| `mix trinity.route.demo --mock` | Primary safe runtime demo. Use this first. |
+| `mix trinity.route.demo --provider-pool ...` | Gated live-provider runtime demo. Requires `TRINITY_ENABLE_PROVIDER_DEMO=1` or `--allow-live`. |
+| `mix trinity.demo --mock` | Compatibility wrapper around `mix trinity.route.demo --mock`. |
+| `mix trinity.hitl.mock_loop` | Terse mock orchestrator loop with pass/fail output. |
+| `mix trinity.hitl.adapted` | Adapted Qwen coordinator shape/logit check. |
+| `mix trinity.hitl.gpu` | CUDA/EXLA visibility check. |
+| `mix trinity.hitl.base_qwen` | Base Qwen CUDA hidden-state check. |
+| `mix trinity.hitl.head_route` | Live hidden-state to Sakana-head routing check. |
+| `mix trinity.hitl.vector` | Sakana router-vector split check. |
+
+Artifact and parity commands:
+
+| Command | Use |
+| --- | --- |
+| `mix trinity.sakana.import_python` | Import Python semantic Sakana artifacts into the canonical Elixir layout. |
+| `mix trinity.sakana.export_adapted` | Export Sakana-adapted Qwen tensors and router head. |
+| `mix trinity.sakana.parity_sample` | Emit Elixir SVD/SVF parity diagnostics. |
+| `mix trinity.sakana.router_trace` | Emit and compare fixed-transcript router traces. |
+| `mix trinity.sakana.large_tensor_chunks` | Replay embedding and LM-head Sakana stages in row chunks. |
 
 ## Examples
 
