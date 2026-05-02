@@ -910,7 +910,7 @@ defmodule TrinityCoordinator.Sakana.ParityTrace do
     backend
     |> inspect()
     |> String.downcase()
-    |> String.replace(~r/[^a-z0-9]+/, "_")
+    |> collapse_non_alnum("_")
     |> String.trim("_")
   end
 
@@ -1142,7 +1142,49 @@ defmodule TrinityCoordinator.Sakana.ParityTrace do
   defp sanitize_python_key(source_name) do
     source_name
     |> String.replace("/", "__")
-    |> String.replace(~r/[^0-9A-Za-z_.-]/, "__")
+    |> replace_non_safe_path_chars("__")
+  end
+
+  defp collapse_non_alnum(value, replacement) do
+    {iodata, _in_replacement?} =
+      value
+      |> String.to_charlist()
+      |> Enum.reduce({[], false}, fn char, {acc, in_replacement?} ->
+        cond do
+          alnum?(char) ->
+            {[char | acc], false}
+
+          in_replacement? ->
+            {acc, true}
+
+          true ->
+            {[replacement | acc], true}
+        end
+      end)
+
+    iodata
+    |> Enum.reverse()
+    |> IO.iodata_to_binary()
+  end
+
+  defp replace_non_safe_path_chars(value, replacement) do
+    value
+    |> String.to_charlist()
+    |> Enum.map(fn char ->
+      if safe_path_char?(char), do: char, else: replacement
+    end)
+    |> IO.iodata_to_binary()
+  end
+
+  defp alnum?(char) do
+    (char >= ?0 and char <= ?9) or
+      (char >= ?a and char <= ?z)
+  end
+
+  defp safe_path_char?(char) do
+    alnum?(char) or
+      (char >= ?A and char <= ?Z) or
+      char in [?-, ?_, ?.]
   end
 
   defp tensor_stage_key(source_name, stage_name) do

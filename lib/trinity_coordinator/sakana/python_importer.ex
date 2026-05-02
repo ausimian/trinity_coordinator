@@ -691,7 +691,7 @@ defmodule TrinityCoordinator.Sakana.PythonImporter do
 
   defp checkpoint_file(index, path) do
     idx = Integer.to_string(index) |> String.pad_leading(@checkpoint_width, "0")
-    safe_path = Regex.replace(~r/[^0-9A-Za-z_.-]/, path, "_")
+    safe_path = replace_non_safe_path_chars(path, "_")
     "#{idx}_#{safe_path}.safetensors"
   end
 
@@ -715,7 +715,23 @@ defmodule TrinityCoordinator.Sakana.PythonImporter do
   defp sanitize_python_key(source_name) do
     source_name
     |> String.replace("/", "__")
-    |> String.replace(~r/[^0-9A-Za-z_.-]/, "__")
+    |> replace_non_safe_path_chars("__")
+  end
+
+  defp replace_non_safe_path_chars(value, replacement) do
+    value
+    |> String.to_charlist()
+    |> Enum.map(fn char ->
+      if safe_path_char?(char), do: char, else: replacement
+    end)
+    |> IO.iodata_to_binary()
+  end
+
+  defp safe_path_char?(char) do
+    (char >= ?0 and char <= ?9) or
+      (char >= ?A and char <= ?Z) or
+      (char >= ?a and char <= ?z) or
+      char in [?-, ?_, ?.]
   end
 
   defp normalize_shape(nil), do: nil

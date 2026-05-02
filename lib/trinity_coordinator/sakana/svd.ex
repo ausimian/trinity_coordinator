@@ -418,8 +418,21 @@ defmodule TrinityCoordinator.Sakana.SVD do
   end
 
   defp decoder_block_index(path) do
-    case Regex.run(~r/\bdecoder\.blocks\.(\d+)\./, path) do
-      [_, block] -> String.to_integer(block)
+    case :binary.split(path, "decoder.blocks.") do
+      [_prefix, rest] ->
+        rest
+        |> :binary.split(".")
+        |> List.first()
+        |> parse_block_index()
+
+      _ ->
+        0
+    end
+  end
+
+  defp parse_block_index(value) do
+    case Integer.parse(value) do
+      {index, ""} -> index
       _ -> 0
     end
   end

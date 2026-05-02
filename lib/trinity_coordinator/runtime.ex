@@ -43,9 +43,14 @@ defmodule TrinityCoordinator.Runtime do
   Returns a compact backend label for a tensor.
   """
   def tensor_backend(%Nx.Tensor{} = tensor) do
-    case Regex.run(~r/(EXLA\.Backend<[^>]+>|Nx\.BinaryBackend)/, inspect(tensor)) do
-      [backend | _] -> backend
-      nil -> "unknown"
+    inspected = inspect(tensor)
+
+    cond do
+      String.contains?(inspected, "EXLA.Backend<cuda") -> "EXLA.Backend<cuda:"
+      String.contains?(inspected, "EXLA.Backend<host") -> "EXLA.Backend<host:"
+      String.contains?(inspected, "EXLA.Backend<") -> "EXLA.Backend"
+      String.contains?(inspected, "Nx.BinaryBackend") -> "Nx.BinaryBackend"
+      true -> "unknown"
     end
   end
 end

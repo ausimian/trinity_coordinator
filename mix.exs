@@ -2,8 +2,11 @@ defmodule TrinityCoordinator.MixProject do
   use Mix.Project
 
   @version "0.1.0"
+  @supported_xla_targets ~w(cpu cuda cuda12 rocm tpu)
 
   def project do
+    ensure_supported_xla_target!()
+
     [
       app: :trinity_coordinator,
       version: @version,
@@ -19,11 +22,16 @@ defmodule TrinityCoordinator.MixProject do
         plt_add_apps: [:mix],
         plt_file: {:no_warn, "priv/plts/dialyzer.plt"}
       ],
-      preferred_cli_env: [
+      deps: deps()
+    ]
+  end
+
+  def cli do
+    [
+      preferred_envs: [
         dialyzer: :dev,
         credo: :dev
-      ],
-      deps: deps()
+      ]
     ]
   end
 
@@ -139,5 +147,20 @@ defmodule TrinityCoordinator.MixProject do
       ],
       skip_undefined_reference_warnings_on: ["CHANGELOG.md"]
     ]
+  end
+
+  defp ensure_supported_xla_target! do
+    case System.get_env("XLA_TARGET") do
+      target when target in [nil, ""] ->
+        :ok
+
+      target when target in @supported_xla_targets ->
+        :ok
+
+      _unsupported ->
+        # EXLA 0.9 rejects unsupported ambient targets before dependency compilation.
+        System.put_env("XLA_TARGET", "cpu")
+        System.put_env("EXLA_CPU_ONLY", "1")
+    end
   end
 end

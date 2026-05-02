@@ -39,6 +39,7 @@ defmodule TrinityCoordinator.SLMProfileTest do
     assert Bumblebee.Text.Qwen3 in probe.supported_text_modules
   end
 
+  @tag :integration
   @tag :qwen
   test "loads qwen profile through load_profile/1" do
     Runtime.put_cuda_backend!()
