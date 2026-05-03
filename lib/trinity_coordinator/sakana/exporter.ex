@@ -257,7 +257,8 @@ defmodule TrinityCoordinator.Sakana.Exporter do
   end
 
   defp load_profile(profile) do
-    Runtime.put_cuda_backend!()
+    {:ok, _} = Application.ensure_all_started(:emily)
+    Nx.global_default_backend(Emily.Backend)
 
     case SLMProfile.load_profile(profile) do
       {:ok, {model_info, _tokenizer}} ->
@@ -877,10 +878,11 @@ defmodule TrinityCoordinator.Sakana.Exporter do
   defp ensure_cuda_backend(tensor, path) do
     backend = Runtime.tensor_backend(tensor)
 
-    if String.contains?(backend, "EXLA.Backend<cuda:") do
+    if String.contains?(backend, "EXLA.Backend<cuda:") or
+         String.contains?(backend, "Emily.Backend") do
       :ok
     else
-      {:error, {:non_cuda_backend, path, backend}}
+      {:error, {:non_export_backend, path, backend}}
     end
   end
 

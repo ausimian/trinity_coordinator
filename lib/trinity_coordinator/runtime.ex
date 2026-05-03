@@ -42,15 +42,26 @@ defmodule TrinityCoordinator.Runtime do
   @doc """
   Returns a compact backend label for a tensor.
   """
-  def tensor_backend(%Nx.Tensor{} = tensor) do
-    inspected = inspect(tensor)
+  def tensor_backend(%Nx.Tensor{data: %struct{}} = tensor) do
+    case struct do
+      Emily.Backend ->
+        "Emily.Backend"
 
-    cond do
-      String.contains?(inspected, "EXLA.Backend<cuda") -> "EXLA.Backend<cuda:"
-      String.contains?(inspected, "EXLA.Backend<host") -> "EXLA.Backend<host:"
-      String.contains?(inspected, "EXLA.Backend<") -> "EXLA.Backend"
-      String.contains?(inspected, "Nx.BinaryBackend") -> "Nx.BinaryBackend"
-      true -> "unknown"
+      Nx.BinaryBackend ->
+        "Nx.BinaryBackend"
+
+      EXLA.Backend ->
+        case inspect(tensor) do
+          "#Nx.Tensor<" <> _ = s ->
+            cond do
+              String.contains?(s, "EXLA.Backend<cuda") -> "EXLA.Backend<cuda:"
+              String.contains?(s, "EXLA.Backend<host") -> "EXLA.Backend<host:"
+              true -> "EXLA.Backend"
+            end
+        end
+
+      other ->
+        Atom.to_string(other)
     end
   end
 end

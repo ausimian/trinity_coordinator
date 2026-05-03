@@ -3,7 +3,7 @@ defmodule Examples.QwenRouterPromptEval do
 
   require Logger
 
-  alias TrinityCoordinator.{HITL, RoleInjector, Runtime, Trace}
+  alias TrinityCoordinator.{HITL, RoleInjector, Trace}
   alias TrinityCoordinator.Sakana.{Artifact, Coordinator}
 
   @default_artifact_dir "priv/sakana_trinity/adapted_qwen3_0_6b_layer26"
@@ -259,9 +259,15 @@ defmodule Examples.QwenRouterPromptEval do
     verbose? = Keyword.get(opts, :verbose, false) or show_logits?
 
     HITL.banner("QWEN ROUTER PROMPT EVAL")
-    Runtime.put_cuda_backend!()
+    {:ok, _} = Application.ensure_all_started(:emily)
+    Nx.global_default_backend(Emily.Backend)
 
-    {:ok, coordinator} = Coordinator.load(artifact_dir: artifact_dir)
+    {:ok, coordinator} =
+      Coordinator.load(
+        artifact_dir: artifact_dir,
+        require_cuda: false,
+        backend: Emily.Backend
+      )
 
     IO.puts("""
 

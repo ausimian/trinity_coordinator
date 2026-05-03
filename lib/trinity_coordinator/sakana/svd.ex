@@ -44,7 +44,7 @@ defmodule TrinityCoordinator.Sakana.SVD do
   def decompose_tensor(%Nx.Tensor{} = tensor, opts \\ []) do
     opts = Keyword.validate!(opts, full_matrices?: false, compute_type: :source)
     svd_source = svd_source_tensor!(tensor, opts[:compute_type])
-    {u, s, v} = svd_tuple!(svd_source, opts)
+    {u, s, v} = Nx.LinAlg.svd(svd_source, full_matrices?: opts[:full_matrices?])
     %{u: u, s: s, v: v, shape: Nx.shape(svd_source), source_type: Nx.type(tensor)}
   end
 
@@ -465,20 +465,6 @@ defmodule TrinityCoordinator.Sakana.SVD do
   defp v_for_reconstruction!(_v, other) do
     raise ArgumentError,
           "unsupported SVD v_layout #{inspect(other)}; expected :nx, :vh, or :torch_v"
-  end
-
-  defp svd_tuple!(tensor, opts) do
-    svd = Function.capture(Nx.LinAlg, :svd, 2)
-    result = svd.(tensor, full_matrices?: opts[:full_matrices?])
-
-    case result do
-      {%Nx.Tensor{} = u, %Nx.Tensor{} = s, %Nx.Tensor{} = v} ->
-        {u, s, v}
-
-      other ->
-        raise ArgumentError,
-              "expected Nx.LinAlg.svd/2 to return {u, s, v}, got: #{inspect(other)}"
-    end
   end
 
   defp tensor_from_item!({_path, %Nx.Tensor{} = tensor}), do: tensor
