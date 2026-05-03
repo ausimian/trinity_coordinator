@@ -34,8 +34,8 @@ defmodule TrinityCoordinator.Sakana.ExportSpec do
     :router_head_tensor_key,
     source_vector_path: "priv/sakana_trinity/artifacts/trinity_router_es_vector.safetensors",
     out_dir: "priv/sakana_trinity/adapted_qwen3_0_6b_layer26",
-    xla_target: "cuda12",
-    export_backend: "elixir_nx_exla_cuda"
+    xla_target: "emily",
+    export_backend: "elixir_nx_emily"
   ]
 
   @type t :: %__MODULE__{

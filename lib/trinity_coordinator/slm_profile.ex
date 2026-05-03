@@ -39,7 +39,7 @@ defmodule TrinityCoordinator.SLMProfile do
       module: Bumblebee.Text.Gpt2,
       architecture: :base,
       expected_hidden_size: 32,
-      xla_target: "cuda12",
+      xla_target: "emily",
       status: :ready,
       notes: "Fast local profile for deterministic verification"
     }
@@ -53,10 +53,10 @@ defmodule TrinityCoordinator.SLMProfile do
       module: Bumblebee.Text.Qwen3,
       architecture: :for_causal_language_modeling,
       expected_hidden_size: 1024,
-      xla_target: "cuda12",
+      xla_target: "emily",
       status: :ready,
       load_options: [
-        backend: {EXLA.Backend, client: :cuda},
+        backend: Emily.Backend,
         type: :bf16
       ],
       notes:
@@ -82,7 +82,7 @@ defmodule TrinityCoordinator.SLMProfile do
       module: Bumblebee.Text.Qwen3,
       architecture: :for_causal_language_modeling,
       expected_hidden_size: 1024,
-      xla_target: "cuda12",
+      xla_target: "emily",
       status: :ready,
       adapted_artifact_dir: Artifact.default_output_dir(),
       artifact_patch_options: [
@@ -91,7 +91,7 @@ defmodule TrinityCoordinator.SLMProfile do
         cast_tensors: true
       ],
       load_options: [
-        backend: {EXLA.Backend, client: :cuda},
+        backend: Emily.Backend,
         type: :bf16
       ],
       notes:
@@ -252,6 +252,7 @@ defmodule TrinityCoordinator.SLMProfile do
 
   defp validate_xla_target("cuda12"), do: :ok
   defp validate_xla_target("cuda13"), do: :ok
+  defp validate_xla_target("emily"), do: :ok
   defp validate_xla_target(_), do: {:error, :invalid_profile}
 
   defp probe_module(nil), do: {:incompatible, :missing_module}

@@ -7,6 +7,8 @@ config :exla,
   ],
   preferred_clients: [:cuda, :host]
 
+config :nx, default_backend: Emily.Backend
+
 env_config = Path.expand("#{config_env()}.exs", __DIR__)
 
 if File.exists?(env_config) do

@@ -262,7 +262,12 @@ defmodule Examples.QwenRouterPromptEval do
     {:ok, _} = Application.ensure_all_started(:emily)
     Nx.global_default_backend(Emily.Backend)
 
-    {:ok, coordinator} = Coordinator.load(artifact_dir: artifact_dir)
+    {:ok, coordinator} =
+      Coordinator.load(
+        artifact_dir: artifact_dir,
+        require_cuda: false,
+        backend: Emily.Backend
+      )
 
     IO.puts("""
 
