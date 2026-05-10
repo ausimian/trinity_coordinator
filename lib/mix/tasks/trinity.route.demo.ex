@@ -11,7 +11,9 @@ defmodule Mix.Tasks.Trinity.Route.Demo do
 
   Live provider mode must be explicit:
 
-      TRINITY_ENABLE_PROVIDER_DEMO=1 XLA_TARGET=cuda12 mix trinity.route.demo \
+      XLA_TARGET=cuda12 mix trinity.route.demo \
+        --allow-live \
+        --openai-api-key "$OPENAI_API_KEY" \
         --profile qwen_sakana_adapted \
         --provider-pool gemini_cli_asm \
         --trace-out tmp/trinity_route_demo.jsonl
@@ -62,6 +64,7 @@ defmodule Mix.Tasks.Trinity.Route.Demo do
           max_turns: :integer,
           message: :string,
           mock: :boolean,
+          openai_api_key: :string,
           profile: :string,
           provider_pool: :string,
           run_id: :string,
@@ -83,6 +86,7 @@ defmodule Mix.Tasks.Trinity.Route.Demo do
       max_turns: Keyword.get(opts, :max_turns, 5),
       message: Keyword.get(opts, :message, @default_message),
       mock?: mock?,
+      openai_api_key: Keyword.get(opts, :openai_api_key),
       profile: Keyword.get(opts, :profile, "qwen_sakana_adapted"),
       provider_pool:
         if(governed_authority,
@@ -101,14 +105,8 @@ defmodule Mix.Tasks.Trinity.Route.Demo do
   defp validate_live_gate!(%{profile: "qwen_sakana_adapted", mock?: true} = opts), do: opts
 
   defp validate_live_gate!(%{profile: "qwen_sakana_adapted"} = opts) do
-    enabled? =
-      opts.allow_live? or
-        System.get_env("TRINITY_ENABLE_PROVIDER_DEMO") in ["1", "true", "TRUE", "yes", "YES"]
-
-    unless enabled? do
-      Mix.raise(
-        "live provider demo is gated; pass --mock for local smoke or set TRINITY_ENABLE_PROVIDER_DEMO=1"
-      )
+    unless opts.allow_live? do
+      Mix.raise("live provider demo is gated; pass --mock for local smoke or pass --allow-live")
     end
 
     opts
@@ -183,10 +181,9 @@ defmodule Mix.Tasks.Trinity.Route.Demo do
 
   defp agent_pool_opts(%{governed_authority: authority}) when not is_nil(authority), do: []
 
-  defp agent_pool_opts(_opts) do
+  defp agent_pool_opts(opts) do
     [
-      openai_api_key:
-        first_env(["OPENAI_API_KEY", "TRINITY_OPENAI_API_KEY", "OPENAI_API_KEY_ENV"]),
+      openai_api_key: opts.openai_api_key,
       openai_max_tokens: 128,
       openai_timeout_ms: 30_000
     ]
@@ -237,15 +234,6 @@ defmodule Mix.Tasks.Trinity.Route.Demo do
     |> Enum.find_value(fn line ->
       case Jason.decode(line) do
         {:ok, %{"event" => "run_completed", "final_status" => status}} -> status
-        _ -> nil
-      end
-    end)
-  end
-
-  defp first_env(keys) do
-    Enum.find_value(keys, fn key ->
-      case System.get_env(key) do
-        value when is_binary(value) and value != "" -> value
         _ -> nil
       end
     end)

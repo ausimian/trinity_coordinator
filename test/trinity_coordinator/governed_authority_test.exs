@@ -111,6 +111,23 @@ defmodule TrinityCoordinator.GovernedAuthorityTest do
     end)
   end
 
+  test "route demo provider key is explicit and ignores ambient provider env" do
+    run_with_env([{"OPENAI_API_KEY", "ambient-env-token"}], fn ->
+      opts =
+        Demo.parse_args!([
+          "--allow-live",
+          "--openai-api-key",
+          "explicit-token",
+          "--profile",
+          "qwen_sakana_adapted"
+        ])
+
+      assert opts.allow_live? == true
+      assert opts.openai_api_key == "explicit-token"
+      refute inspect(opts) =~ "ambient-env-token"
+    end)
+  end
+
   defp authority_packet do
     [
       authority_ref: "auth-trinity-1",

@@ -85,16 +85,23 @@ Use HTTPS URLs instead of SSH if your GitHub account is not configured for SSH:
 git clone https://github.com/nshkrdotcom/trinity_coordinator.git
 ```
 
-Why the sibling repos are needed:
+Dependency source selection is handled by
+`build_support/dependency_sources.exs` and
+`build_support/dependency_sources.config.exs`. It tries local sibling paths
+first, then GitHub, then Hex where a Hex package is available. Use
+`.dependency_sources.local.exs` for local overrides; dependency source
+selection does not use environment variables.
 
-- `trinity_coordinator` currently has local path dependencies on
-  `../agent_session_manager` and `../gemini_cli_sdk`.
+Why the sibling repos are useful:
+
+- `trinity_coordinator` uses local sibling checkouts of
+  `../agent_session_manager`, `../gemini_cli_sdk`, and
+  `../inference/apps/inference` when present.
 - `agent_session_manager` and `gemini_cli_sdk` use `../cli_subprocess_core`
   when it is present.
 - `cli_subprocess_core` uses packages inside `../execution_plane` when that
   workspace is present.
-- `inference` is already a GitHub dependency and is fetched by `mix deps.get`;
-  it does not need a sibling checkout for normal Trinity development.
+- Standalone clones fall back to the configured GitHub sources.
 
 ### Model And Artifact Setup
 
@@ -502,27 +509,29 @@ XLA_TARGET=cuda12 mix run examples/mock_orchestration_trace.exs -- \
 Live provider mode is explicitly gated:
 
 ```bash
-TRINITY_ENABLE_PROVIDER_DEMO=1 XLA_TARGET=cuda12 mix trinity.route.demo \
+XLA_TARGET=cuda12 mix trinity.route.demo \
+  --allow-live \
   --profile qwen_sakana_adapted \
   --provider-pool gemini_cli_asm \
   --max-turns 3 \
   --trace-out tmp/trinity_route_demo.jsonl
 ```
 
-Without `--mock`, `--allow-live`, or `TRINITY_ENABLE_PROVIDER_DEMO=1`, live
-provider demo mode fails before dispatch.
+Without `--mock` or `--allow-live`, live provider demo mode fails before
+dispatch.
 
 The built-in default live provider pool maps all seven agent ids to OpenAI
 `gpt-4o-mini` specs. To use it, provide an OpenAI API key and explicitly enable
 live mode:
 
 ```bash
-TRINITY_ENABLE_PROVIDER_DEMO=1 OPENAI_API_KEY=... XLA_TARGET=cuda12 \
-  mix trinity.route.demo \
-    --profile qwen_sakana_adapted \
-    --provider-pool default \
-    --max-turns 3 \
-    --trace-out tmp/trinity_route_demo_openai.jsonl
+XLA_TARGET=cuda12 mix trinity.route.demo \
+  --allow-live \
+  --openai-api-key "$OPENAI_API_KEY" \
+  --profile qwen_sakana_adapted \
+  --provider-pool default \
+  --max-turns 3 \
+  --trace-out tmp/trinity_route_demo_openai.jsonl
 ```
 
 Governed runs do not read normal provider env as authority. They must provide
@@ -558,7 +567,7 @@ Operator-facing commands:
 | Command | Use |
 | --- | --- |
 | `mix trinity.route.demo --mock` | Primary safe runtime demo. Use this first. |
-| `mix trinity.route.demo --provider-pool ...` | Gated live-provider runtime demo. Requires `TRINITY_ENABLE_PROVIDER_DEMO=1` or `--allow-live`. |
+| `mix trinity.route.demo --provider-pool ... --allow-live` | Gated live-provider runtime demo. |
 | `mix trinity.demo --mock` | Compatibility wrapper around `mix trinity.route.demo --mock`. |
 | `mix trinity.hitl.mock_loop` | Terse mock orchestrator loop with pass/fail output. |
 | `mix trinity.hitl.adapted` | Adapted Qwen coordinator shape/logit check. |

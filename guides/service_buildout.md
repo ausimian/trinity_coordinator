@@ -133,15 +133,16 @@ XLA_TARGET=cuda12 mix trinity.route.demo \
 Live provider demo mode is intentionally gated:
 
 ```bash
-TRINITY_ENABLE_PROVIDER_DEMO=1 XLA_TARGET=cuda12 mix trinity.route.demo \
+XLA_TARGET=cuda12 mix trinity.route.demo \
+  --allow-live \
   --profile qwen_sakana_adapted \
   --provider-pool gemini_cli_asm \
   --artifact-dir tmp/sakana_parity/adapted_artifacts_from_python \
   --trace-out tmp/trinity_route_demo.jsonl
 ```
 
-Without `--mock`, `--allow-live`, or `TRINITY_ENABLE_PROVIDER_DEMO=1`, the demo
-fails before loading the model or dispatching to any provider.
+Without `--mock` or `--allow-live`, the demo fails before loading the model or
+dispatching to any provider.
 
 Reviewer examples:
 

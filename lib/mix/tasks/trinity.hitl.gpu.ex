@@ -16,7 +16,7 @@ defmodule Mix.Tasks.Trinity.Hitl.Gpu do
     Mix.Task.run("app.start")
 
     HITL.banner("TRINITY HITL GPU CHECK")
-    HITL.kv("XLA_TARGET", System.get_env("XLA_TARGET", "(unset)"))
+    HITL.kv("EXLA target", "configured by runtime")
 
     platforms = HITL.require_cuda!()
     HITL.kv("CUDA platform", Map.get(platforms, :cuda))

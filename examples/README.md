@@ -161,11 +161,11 @@ Session Manager specs are routed through the shared `:inference` package by
 real provider pool is configured:
 
 ```bash
-TRINITY_ENABLE_PROVIDER_DEMO=1 XLA_TARGET=cuda12 mix trinity.route.demo \
+XLA_TARGET=cuda12 mix trinity.route.demo \
+  --allow-live \
   --profile qwen_sakana_adapted \
   --provider-pool configured \
   --trace-out tmp/trinity_route_demo_live.jsonl
 ```
 
-Without `TRINITY_ENABLE_PROVIDER_DEMO=1` or `--allow-live`, live mode fails
-before provider dispatch.
+Without `--allow-live`, live mode fails before provider dispatch.

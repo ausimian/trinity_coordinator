@@ -71,7 +71,7 @@ Use red-green-refactor and commit/push only after the listed quality gates pass.
      explicit max-turn latest-worker fallback.
 
 5. Budget and live-smoke gates
-   - Require `TRINITY_ENABLE_PROVIDER_DEMO=1` or equivalent for live calls.
+   - Require explicit `--allow-live` task input for live route-demo calls.
    - Require a positive budget variable for release smoke tests.
    - Limit max tokens and max turns in smoke tests.
    - Skip live smokes when credentials or budget are absent.
@@ -117,7 +117,8 @@ XLA_TARGET=cuda12 mix run examples/mock_orchestration_trace.exs -- \
 Credential-gated live smoke, only after configuration:
 
 ```bash
-TRINITY_ENABLE_PROVIDER_DEMO=1 XLA_TARGET=cuda12 mix trinity.route.demo \
+XLA_TARGET=cuda12 mix trinity.route.demo \
+  --allow-live \
   --profile qwen_sakana_adapted \
   --provider-pool gemini_cli_asm \
   --artifact-dir tmp/sakana_parity/adapted_artifacts_from_python \

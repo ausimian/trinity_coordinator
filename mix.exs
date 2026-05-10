@@ -1,12 +1,13 @@
+unless Code.ensure_loaded?(DependencySources) do
+  Code.require_file("build_support/dependency_sources.exs", __DIR__)
+end
+
 defmodule TrinityCoordinator.MixProject do
   use Mix.Project
 
   @version "0.1.0"
-  @supported_xla_targets ~w(cpu cuda cuda12 rocm tpu)
 
   def project do
-    ensure_supported_xla_target!()
-
     [
       app: :trinity_coordinator,
       version: @version,
@@ -54,9 +55,9 @@ defmodule TrinityCoordinator.MixProject do
        ref: "0fd8114cf5429af9236f100f3350986e9d823c02",
        override: true},
       {:exla, "~> 0.9"},
-      {:inference, github: "nshkrdotcom/inference", sparse: "apps/inference"},
-      {:agent_session_manager, path: "../agent_session_manager"},
-      {:gemini_cli_sdk, path: "../gemini_cli_sdk"},
+      DependencySources.dep(:inference, __DIR__),
+      DependencySources.dep(:agent_session_manager, __DIR__),
+      DependencySources.dep(:gemini_cli_sdk, __DIR__),
       {:req, "~> 0.5"},
       {:credo, "~> 1.7", only: :dev, runtime: false},
       {:dialyxir, "~> 1.4", only: :dev, runtime: false},
@@ -78,10 +79,12 @@ defmodule TrinityCoordinator.MixProject do
         "README.md",
         "CHANGELOG.md",
         "LICENSE",
+        "AGENTS.md",
         "assets",
+        "build_support",
         "examples",
         "guides",
-        "docs"
+        "docs/*.md"
       ]
     ]
   end
@@ -168,20 +171,5 @@ defmodule TrinityCoordinator.MixProject do
       ],
       skip_undefined_reference_warnings_on: ["CHANGELOG.md"]
     ]
-  end
-
-  defp ensure_supported_xla_target! do
-    case System.get_env("XLA_TARGET") do
-      target when target in [nil, ""] ->
-        :ok
-
-      target when target in @supported_xla_targets ->
-        :ok
-
-      _unsupported ->
-        # EXLA 0.9 rejects unsupported ambient targets before dependency compilation.
-        System.put_env("XLA_TARGET", "cpu")
-        System.put_env("EXLA_CPU_ONLY", "1")
-    end
   end
 end

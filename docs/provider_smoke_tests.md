@@ -161,7 +161,8 @@ XLA_TARGET=cuda12 mix test --only provider_smoke --trace
 Gemini CLI through ASM:
 
 ```bash
-TRINITY_ENABLE_PROVIDER_DEMO=1 XLA_TARGET=cuda12 mix trinity.route.demo \
+XLA_TARGET=cuda12 mix trinity.route.demo \
+  --allow-live \
   --profile qwen_sakana_adapted \
   --provider-pool gemini_cli_asm \
   --artifact-dir tmp/sakana_parity/adapted_artifacts_from_python \

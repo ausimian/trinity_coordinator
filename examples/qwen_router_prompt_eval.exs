@@ -7,7 +7,6 @@ defmodule Examples.QwenRouterPromptEval do
   alias TrinityCoordinator.Sakana.{Artifact, Coordinator}
 
   @default_artifact_dir "priv/sakana_trinity/adapted_qwen3_0_6b_layer26"
-  @child_env "TRINITY_QWEN_ROUTER_PROMPT_EVAL_CHILD"
   @native_log_path "tmp/examples/qwen_router_prompt_eval.native.log"
 
   @agent_names %{
@@ -168,6 +167,7 @@ defmodule Examples.QwenRouterPromptEval do
           list_cases: :boolean,
           no_assert: :boolean,
           show_logits: :boolean,
+          suppress_native_logs_child: :boolean,
           verbose: :boolean
         ]
       )
@@ -187,7 +187,7 @@ defmodule Examples.QwenRouterPromptEval do
 
   defp maybe_reexec_with_suppressed_stderr!(argv) do
     cond do
-      System.get_env(@child_env) == "1" ->
+      "--suppress-native-logs-child" in argv ->
         :ok
 
       "--list-cases" in argv ->
@@ -204,8 +204,7 @@ defmodule Examples.QwenRouterPromptEval do
         stderr_path=$1
         script_path=$2
         shift 2
-        export #{@child_env}=1
-        mix run "$script_path" -- "$@" 2>"$stderr_path"
+        mix run "$script_path" -- --suppress-native-logs-child "$@" 2>"$stderr_path"
         """
 
         {_output, status} =
