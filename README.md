@@ -255,7 +255,7 @@ that the project works end to end without spending provider budget:
 
 ```bash
 XLA_TARGET=cuda12 mix trinity.route.demo \
-  --mock \
+  --mock-provider \
   --trace-out tmp/trinity_route_demo.jsonl
 ```
 
@@ -455,25 +455,26 @@ provider-boundary behavior without pretending that external LLM calls happened.
 
 ## Running The Router
 
-Use `mix trinity.route.demo --mock` as the primary operator-facing command. It
+Use `mix trinity.route.demo --mock-provider` as the primary operator-facing command (the
+shorter spelling `--mock` is preserved as an alias). It
 exercises the local adapted router, role injection, provider boundary, verifier
 termination, and JSONL trace persistence without external LLM calls:
 
 ```bash
 XLA_TARGET=cuda12 mix trinity.route.demo \
-  --mock \
+  --mock-provider \
   --trace-out tmp/trinity_route_demo.jsonl
 ```
 
-`mix trinity.demo --mock` is kept as a compatibility wrapper and delegates to
-the same route demo. Prefer `mix trinity.route.demo --mock` in new docs,
+`mix trinity.demo --mock-provider` is kept as a compatibility wrapper and delegates to
+the same route demo. Prefer `mix trinity.route.demo --mock-provider` in new docs,
 scripts, and smoke checks.
 
 The next most useful commands are:
 
 | Command | Purpose | Provider calls |
 | --- | --- | --- |
-| `mix trinity.route.demo --mock` | Primary end-to-end smoke: adapted router, mock provider boundary, verifier termination, trace output | Mock only |
+| `mix trinity.route.demo --mock-provider` | Primary end-to-end smoke: adapted router, mock provider boundary, verifier termination, trace output (`--mock` is an alias) | Mock only |
 | `mix run examples/local_coordinator_route.exs -- ...` | Inspect tokenization, hidden vector, logits, selected agent, and selected role | None |
 | `mix run examples/qwen_router_prompt_eval.exs` | Eval-style prompt suite that asserts expected Qwen router agent/role choices | None |
 | `mix run examples/mock_orchestration_trace.exs -- ...` | Reviewer-friendly orchestration trace with printed mock turns | Mock only |
@@ -517,7 +518,7 @@ XLA_TARGET=cuda12 mix trinity.route.demo \
   --trace-out tmp/trinity_route_demo.jsonl
 ```
 
-Without `--mock` or `--allow-live`, live provider demo mode fails before
+Without `--mock-provider` (alias `--mock`) or `--allow-live`, live provider demo mode fails before
 dispatch.
 
 The built-in default live provider pool maps all seven agent ids to OpenAI
@@ -566,9 +567,9 @@ Operator-facing commands:
 
 | Command | Use |
 | --- | --- |
-| `mix trinity.route.demo --mock` | Primary safe runtime demo. Use this first. |
+| `mix trinity.route.demo --mock-provider` | Primary safe runtime demo. Use this first. `--mock` is an alias. |
 | `mix trinity.route.demo --provider-pool ... --allow-live` | Gated live-provider runtime demo. |
-| `mix trinity.demo --mock` | Compatibility wrapper around `mix trinity.route.demo --mock`. |
+| `mix trinity.demo --mock-provider` | Compatibility wrapper around `mix trinity.route.demo --mock-provider`. |
 | `mix trinity.hitl.mock_loop` | Terse mock orchestrator loop with pass/fail output. |
 | `mix trinity.hitl.adapted` | Adapted Qwen coordinator shape/logit check. |
 | `mix trinity.hitl.gpu` | CUDA/EXLA visibility check. |

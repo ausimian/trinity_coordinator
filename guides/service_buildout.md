@@ -125,7 +125,7 @@ Operator demo in mock mode:
 
 ```bash
 XLA_TARGET=cuda12 mix trinity.route.demo \
-  --mock \
+  --mock-provider \
   --artifact-dir tmp/sakana_parity/adapted_artifacts_from_python \
   --trace-out tmp/trinity_route_demo.jsonl
 ```
@@ -141,7 +141,7 @@ XLA_TARGET=cuda12 mix trinity.route.demo \
   --trace-out tmp/trinity_route_demo.jsonl
 ```
 
-Without `--mock` or `--allow-live`, the demo fails before loading the model or
+Without `--mock-provider` (alias `--mock`) or `--allow-live`, the demo fails before loading the model or
 dispatching to any provider.
 
 Reviewer examples:

@@ -2,12 +2,16 @@ defmodule Mix.Tasks.Trinity.Route.Demo do
   @moduledoc """
   Runs the adapted coordinator through the runtime provider boundary.
 
-  Mock mode is the default safe smoke:
+  Mock mode is the default safe smoke. `--mock-provider` is the preferred
+  spelling; `--mock` is preserved as an alias.
 
       XLA_TARGET=cuda12 mix trinity.route.demo \
-        --mock \
+        --mock-provider \
         --artifact-dir tmp/sakana_parity/adapted_artifacts_from_python \
         --trace-out tmp/trinity_route_demo.jsonl
+
+  Both flags only mock the **provider** boundary; the local SLM router still
+  loads the canonical artifact and routes the transcript.
 
   Live provider mode must be explicit:
 
@@ -64,6 +68,7 @@ defmodule Mix.Tasks.Trinity.Route.Demo do
           max_turns: :integer,
           message: :string,
           mock: :boolean,
+          mock_provider: :boolean,
           openai_api_key: :string,
           profile: :string,
           provider_pool: :string,
@@ -76,7 +81,7 @@ defmodule Mix.Tasks.Trinity.Route.Demo do
     unless rest == [], do: Mix.raise("Unexpected arguments: #{inspect(rest)}")
     unless errors == [], do: Mix.raise("Invalid options: #{inspect(errors)}")
 
-    mock? = Keyword.get(opts, :mock, false)
+    mock? = Keyword.get(opts, :mock_provider, Keyword.get(opts, :mock, false))
     governed_authority = governed_authority(opts)
 
     %{
@@ -106,7 +111,9 @@ defmodule Mix.Tasks.Trinity.Route.Demo do
 
   defp validate_live_gate!(%{profile: "qwen_sakana_adapted"} = opts) do
     unless opts.allow_live? do
-      Mix.raise("live provider demo is gated; pass --mock for local smoke or pass --allow-live")
+      Mix.raise(
+        "live provider demo is gated; pass --mock-provider (preferred) or --mock for local smoke, or pass --allow-live"
+      )
     end
 
     opts

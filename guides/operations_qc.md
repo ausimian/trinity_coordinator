@@ -203,7 +203,7 @@ Safe route demo:
 
 ```bash
 XLA_TARGET=cuda12 mix trinity.route.demo \
-  --mock \
+  --mock-provider \
   --artifact-dir tmp/sakana_parity/adapted_artifacts_from_python \
   --trace-out tmp/trinity_route_demo.jsonl
 ```
