@@ -1,0 +1,45 @@
+name: CUDA (manual)
+
+on:
+  workflow_dispatch:
+
+# CUDA-bound jobs run on a maintainer-hosted runner only. This workflow is
+# intentionally manual; GitHub-hosted runners do not have CUDA, and the full
+# parity / Qwen-load matrix has wall-clock costs that should not be invoked
+# from every push.
+jobs:
+  cuda-smoke:
+    name: CUDA router smoke + parity gates (manual)
+    runs-on: [self-hosted, linux, x64, cuda]
+
+    env:
+      MIX_ENV: dev
+      XLA_TARGET: cuda12
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install deps
+        run: mix deps.get
+
+      - name: trinity.env.check --require cuda12
+        run: mix trinity.env.check --require cuda12
+
+      - name: Router prompt eval (snapshot + determinism)
+        run: |
+          mix run examples/qwen_router_prompt_eval.exs \
+            --snapshot examples/fixtures/qwen_router_prompt_eval_logits.json \
+            --determinism-runs 2
+
+      - name: trinity.gates (full + advisory hex.build)
+        run: |
+          mix trinity.gates \
+            --include-hex-build \
+            --summary-out tmp/cuda_gates_summary.json
+
+      - name: Upload summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trinity_cuda_gates_summary
+          path: tmp/cuda_gates_summary.json
