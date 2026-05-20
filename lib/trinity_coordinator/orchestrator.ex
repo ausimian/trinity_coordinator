@@ -76,6 +76,21 @@ defmodule TrinityCoordinator.Orchestrator do
     num_roles = Keyword.get(opts, :num_roles, 3)
     trace = Trace.Context.new(Keyword.get(opts, :trace, []))
 
+    budgets =
+      Keyword.get(opts, :budgets, %{})
+      |> Map.put_new(:max_wall_time_ms, Keyword.get(opts, :max_wall_time_ms))
+      |> Map.put_new(:max_provider_calls, Keyword.get(opts, :max_provider_calls))
+      |> Map.put_new(:max_provider_latency_ms, Keyword.get(opts, :max_provider_latency_ms))
+      |> Map.put_new(:max_verifier_revisions, Keyword.get(opts, :max_verifier_revisions))
+      |> Map.put_new(:max_estimated_cost_usd, Keyword.get(opts, :max_estimated_cost_usd))
+
+    counters = %{
+      started_monotonic_ms: System.monotonic_time(:millisecond),
+      provider_calls_ref: :counters.new(1, [:atomics]),
+      verifier_revisions_ref: :counters.new(1, [:atomics]),
+      estimated_cost_micro_usd_ref: :counters.new(1, [:atomics])
+    }
+
     run_ctx = %{
       roles: roles,
       stop_token: stop_token,
@@ -86,7 +101,9 @@ defmodule TrinityCoordinator.Orchestrator do
       mock_agent_fn: Keyword.get(opts, :mock_agent_fn),
       extractor_fn: Keyword.get(opts, :extractor_fn),
       route_opts: Keyword.get(opts, :route_opts, []),
-      respect_thinker_suggestions: Keyword.get(opts, :respect_thinker_suggestions, true)
+      respect_thinker_suggestions: Keyword.get(opts, :respect_thinker_suggestions, true),
+      budgets: budgets,
+      counters: counters
     }
 
     runtime_metadata = build_runtime_metadata(opts[:slm_context])
@@ -184,7 +201,7 @@ defmodule TrinityCoordinator.Orchestrator do
 
   defp do_run_loop(
          pid,
-         {model, params} = routing,
+         routing,
          turn,
          max_turns,
          slm_context,
@@ -192,6 +209,17 @@ defmodule TrinityCoordinator.Orchestrator do
          trace,
          state
        ) do
+    case check_budgets(run_ctx, :turn_start, %{turn: turn}) do
+      {:budget_exceeded, kind, details} ->
+        emit_trace(trace, :run_failed, %{reason: {:budget_exceeded, kind}, details: details})
+        {:error, {:budget_exceeded, kind, details}}
+
+      :ok ->
+        do_turn(pid, routing, turn, max_turns, slm_context, run_ctx, trace, state)
+    end
+  end
+
+  defp do_turn(pid, {model, params}, turn, max_turns, slm_context, run_ctx, trace, state) do
     messages = StateManager.get_messages(pid)
     transcript_hash = Trace.Hash.messages(messages)
 
@@ -222,6 +250,8 @@ defmodule TrinityCoordinator.Orchestrator do
          injected_messages <- RoleInjector.inject_role(messages, role_name),
          {:ok, dispatch_started} <-
            emit_dispatch_started(trace, turn, run_ctx, route, role_name),
+         :ok <-
+           bump_and_check_provider_budget(run_ctx, trace, turn),
          {:ok, dispatch} <-
            dispatch_agent_timed(
              run_ctx.mock_agent_fn,
@@ -306,7 +336,7 @@ defmodule TrinityCoordinator.Orchestrator do
       else
         do_run_loop(
           pid,
-          routing,
+          {model, params},
           turn + 1,
           max_turns,
           slm_context,
@@ -669,4 +699,115 @@ defmodule TrinityCoordinator.Orchestrator do
 
   defp normalize_extraction({:error, reason}), do: {:error, reason}
   defp normalize_extraction(_), do: {:error, :invalid_extractor_result}
+
+  # --- Budget enforcement (Phase 10) ---
+
+  defp bump_and_check_provider_budget(run_ctx, trace, turn) do
+    case run_ctx[:counters][:provider_calls_ref] do
+      nil -> :ok
+      ref -> :counters.add(ref, 1, 1)
+    end
+
+    case check_budgets(run_ctx, :before_dispatch, %{turn: turn}) do
+      {:budget_exceeded, kind, details} ->
+        emit_trace(trace, :run_failed, %{reason: {:budget_exceeded, kind}, details: details})
+        {:error, {:budget_exceeded, kind, details}}
+
+      :ok ->
+        :ok
+    end
+  end
+
+  @doc false
+  def check_budgets(run_ctx, kind, extras \\ %{}) when is_atom(kind) and is_map(extras) do
+    budgets = Map.get(run_ctx, :budgets, %{})
+    counters = Map.get(run_ctx, :counters, %{})
+
+    cond do
+      exceeded_wall_time?(budgets, counters) ->
+        {:budget_exceeded, :wall_time,
+         %{
+           limit_ms: budgets[:max_wall_time_ms],
+           elapsed_ms: elapsed_ms(counters[:started_monotonic_ms] || 0),
+           checkpoint: kind
+         }
+         |> Map.merge(extras)}
+
+      exceeded_provider_calls?(budgets, counters) ->
+        {:budget_exceeded, :provider_calls,
+         %{
+           limit: budgets[:max_provider_calls],
+           observed: provider_call_count(counters),
+           checkpoint: kind
+         }
+         |> Map.merge(extras)}
+
+      exceeded_verifier_revisions?(budgets, counters) ->
+        {:budget_exceeded, :verifier_revisions,
+         %{
+           limit: budgets[:max_verifier_revisions],
+           observed: verifier_revision_count(counters),
+           checkpoint: kind
+         }
+         |> Map.merge(extras)}
+
+      exceeded_cost?(budgets, counters) ->
+        {:budget_exceeded, :estimated_cost_usd,
+         %{
+           limit_usd: budgets[:max_estimated_cost_usd],
+           observed_usd: estimated_cost_usd(counters),
+           checkpoint: kind
+         }
+         |> Map.merge(extras)}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp exceeded_wall_time?(%{max_wall_time_ms: nil}, _), do: false
+
+  defp exceeded_wall_time?(%{max_wall_time_ms: limit}, counters) when is_integer(limit) do
+    elapsed_ms(counters[:started_monotonic_ms] || 0) >= limit
+  end
+
+  defp exceeded_wall_time?(_, _), do: false
+
+  defp exceeded_provider_calls?(%{max_provider_calls: nil}, _), do: false
+
+  defp exceeded_provider_calls?(%{max_provider_calls: limit}, counters)
+       when is_integer(limit) do
+    provider_call_count(counters) >= limit
+  end
+
+  defp exceeded_provider_calls?(_, _), do: false
+
+  defp exceeded_verifier_revisions?(%{max_verifier_revisions: nil}, _), do: false
+
+  defp exceeded_verifier_revisions?(%{max_verifier_revisions: limit}, counters)
+       when is_integer(limit) do
+    verifier_revision_count(counters) >= limit
+  end
+
+  defp exceeded_verifier_revisions?(_, _), do: false
+
+  defp exceeded_cost?(%{max_estimated_cost_usd: nil}, _), do: false
+
+  defp exceeded_cost?(%{max_estimated_cost_usd: limit}, counters)
+       when is_number(limit) do
+    estimated_cost_usd(counters) >= limit
+  end
+
+  defp exceeded_cost?(_, _), do: false
+
+  defp provider_call_count(%{provider_calls_ref: ref}), do: :counters.get(ref, 1)
+  defp provider_call_count(_), do: 0
+
+  defp verifier_revision_count(%{verifier_revisions_ref: ref}), do: :counters.get(ref, 1)
+  defp verifier_revision_count(_), do: 0
+
+  defp estimated_cost_usd(%{estimated_cost_micro_usd_ref: ref}),
+    do: :counters.get(ref, 1) / 1_000_000
+
+  defp estimated_cost_usd(_), do: 0.0
 end

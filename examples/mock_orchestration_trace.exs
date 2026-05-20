@@ -2,7 +2,7 @@ defmodule Examples.MockOrchestrationTrace do
   @moduledoc false
 
   alias TrinityCoordinator.{HITL, Orchestrator, Runtime, StateManager, Trace}
-  alias TrinityCoordinator.Sakana.{Artifact, Coordinator}
+  alias TrinityCoordinator.Sakana.Artifact
 
   @default_artifact_dir "tmp/sakana_parity/adapted_artifacts_from_python"
   @default_prompt "Select a TRINITY role for this reasoning task."
