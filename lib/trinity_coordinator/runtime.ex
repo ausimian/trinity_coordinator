@@ -17,7 +17,7 @@ defmodule TrinityCoordinator.Runtime do
     platforms = supported_platforms()
 
     unless Map.get(platforms, :cuda, 0) > 0 do
-      raise "EXLA CUDA platform is not available; run with XLA_TARGET=cuda12 for the current Bumblebee stack"
+      raise "EXLA CUDA platform is not available. XLA/EXLA must be fetched or compiled with XLA_TARGET=cuda12 before starting this task; setting XLA_TARGET only on the final mix invocation cannot add CUDA to an existing build. Check the current BEAM with: mix run --no-start -e 'IO.inspect(EXLA.Client.get_supported_platforms())'. Rebuild with: rm -rf _build/dev/lib/xla _build/dev/lib/exla deps/xla deps/exla && XLA_TARGET=cuda12 mix deps.get && XLA_TARGET=cuda12 mix deps.compile xla exla --force"
     end
 
     platforms

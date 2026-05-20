@@ -131,7 +131,7 @@ defmodule Mix.Tasks.Trinity.Route.Demo do
   end
 
   defp run_route_demo!(opts) do
-    {:ok, coordinator} = Coordinator.load(artifact_dir: opts.artifact_dir)
+    coordinator = load_coordinator!(opts)
     {:ok, pid} = StateManager.start_link([%{role: "user", content: opts.message}])
 
     result =
@@ -144,6 +144,19 @@ defmodule Mix.Tasks.Trinity.Route.Demo do
 
     Map.put(opts, :result, result)
   end
+
+  defp load_coordinator!(opts) do
+    case Coordinator.load(artifact_dir: opts.artifact_dir) do
+      {:ok, coordinator} ->
+        coordinator
+
+      {:error, reason} ->
+        Mix.raise("route demo coordinator load failed: #{format_load_error(reason)}")
+    end
+  end
+
+  defp format_load_error({:coordinator_load_error, message}) when is_binary(message), do: message
+  defp format_load_error(reason), do: inspect(reason)
 
   defp orchestrator_opts(coordinator, opts) do
     [
