@@ -13,8 +13,8 @@ defmodule Mix.Tasks.Trinity.Sakana.RouterTrace do
 
   use Mix.Task
 
-  alias TrinityCoordinator.{Extractor, HITL, Runtime}
-  alias TrinityCoordinator.Sakana.{Artifact, Coordinator}
+  alias TrinityCoordinator.{Extractor, HITL, MixHelpers, Runtime}
+  alias TrinityCoordinator.Sakana.Artifact
 
   @shortdoc "Emit fixed-transcript Sakana router trace"
   @default_message "Select a TRINITY role for this reasoning task."
@@ -39,7 +39,7 @@ defmodule Mix.Tasks.Trinity.Sakana.RouterTrace do
     HITL.banner("TRINITY SAKANA ROUTER TRACE")
     Runtime.put_cuda_backend!()
 
-    {:ok, coordinator} = Coordinator.load(artifact_dir: opts.artifact_dir)
+    coordinator = MixHelpers.load_coordinator!(artifact_dir: opts.artifact_dir)
 
     messages = [%{"role" => "user", "content" => opts.message}]
     manifest_path = Artifact.manifest_path(opts.artifact_dir)

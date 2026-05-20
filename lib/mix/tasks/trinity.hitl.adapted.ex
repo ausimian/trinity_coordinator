@@ -17,7 +17,7 @@ defmodule Mix.Tasks.Trinity.Hitl.Adapted do
 
   use Mix.Task
 
-  alias TrinityCoordinator.{HITL, Runtime, SLMProfile}
+  alias TrinityCoordinator.{HITL, MixHelpers, Runtime, SLMProfile}
   alias TrinityCoordinator.Sakana.{Artifact, Coordinator, SVD}
 
   @shortdoc "HITL adapted-Qwen coordinator route check"
@@ -34,7 +34,7 @@ defmodule Mix.Tasks.Trinity.Hitl.Adapted do
     Runtime.put_cuda_backend!()
 
     {:ok, {base_info, _base_tokenizer}} = SLMProfile.load_profile(:qwen_coordinator)
-    {:ok, coordinator} = Coordinator.load(artifact_dir: opts.artifact_dir)
+    coordinator = MixHelpers.load_coordinator!(artifact_dir: opts.artifact_dir)
 
     HITL.kv("Artifact dir", coordinator.artifact_dir)
     HITL.kv("Artifact status", coordinator.manifest["status"])

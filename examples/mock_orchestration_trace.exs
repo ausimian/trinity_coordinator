@@ -59,7 +59,9 @@ defmodule Examples.MockOrchestrationTrace do
     File.mkdir_p!(Path.dirname(context.trace_path))
     File.rm(context.trace_path)
 
-    {:ok, coordinator} = Coordinator.load(artifact_dir: context.artifact_dir)
+    coordinator =
+      TrinityCoordinator.MixHelpers.load_coordinator!(artifact_dir: context.artifact_dir)
+
     {:ok, pid} = StateManager.start_link([%{role: "user", content: context.prompt}])
 
     result =

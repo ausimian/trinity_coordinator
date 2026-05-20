@@ -12,8 +12,8 @@ defmodule Mix.Tasks.Trinity.Hitl.MockLoop do
 
   use Mix.Task
 
-  alias TrinityCoordinator.{HITL, Orchestrator, StateManager}
-  alias TrinityCoordinator.Sakana.{Artifact, Coordinator}
+  alias TrinityCoordinator.{HITL, MixHelpers, Orchestrator, StateManager}
+  alias TrinityCoordinator.Sakana.Artifact
 
   @shortdoc "HITL adapted coordinator mock-orchestrator check"
   @default_trace_path "tmp/trinity_mock_trace.jsonl"
@@ -72,7 +72,7 @@ defmodule Mix.Tasks.Trinity.Hitl.MockLoop do
   end
 
   defp run_mock_orchestrator!(context) do
-    {:ok, coordinator} = Coordinator.load(artifact_dir: context.artifact_dir)
+    coordinator = MixHelpers.load_coordinator!(artifact_dir: context.artifact_dir)
     {:ok, pid} = start_state_manager!(context.message)
     turn_counter = :counters.new(1, [])
 

@@ -260,7 +260,7 @@ defmodule Examples.QwenRouterPromptEval do
     HITL.banner("QWEN ROUTER PROMPT EVAL")
     Runtime.put_cuda_backend!()
 
-    {:ok, coordinator} = Coordinator.load(artifact_dir: artifact_dir)
+    coordinator = TrinityCoordinator.MixHelpers.load_coordinator!(artifact_dir: artifact_dir)
 
     IO.puts("""
 

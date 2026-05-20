@@ -32,7 +32,7 @@ defmodule Examples.LocalCoordinatorRoute do
     HITL.banner("TRINITY EXAMPLE: LOCAL COORDINATOR ROUTE")
     Runtime.put_cuda_backend!()
 
-    {:ok, coordinator} = Coordinator.load(artifact_dir: artifact_dir)
+    coordinator = TrinityCoordinator.MixHelpers.load_coordinator!(artifact_dir: artifact_dir)
 
     messages = [%{role: "user", content: prompt}]
     {:ok, routed} = Coordinator.route_messages(coordinator, messages)
