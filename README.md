@@ -79,6 +79,14 @@ cd trinity_coordinator
 mix deps.get
 ```
 
+**Quick path: standalone clone.** You can also clone just `trinity_coordinator`
+by itself and let `mix deps.get` fall through to the GitHub-hosted versions of
+the sibling dependencies. The sibling-checkout layout above is sibling-dev
+advice, not a hard requirement: `build_support/dependency_sources.config.exs`
+declares `default_order: [:path, :github, :hex]` for each of
+`agent_session_manager`, `gemini_cli_sdk`, and `inference`, so the GitHub
+fallback is used automatically when the local sibling path is absent.
+
 Use HTTPS URLs instead of SSH if your GitHub account is not configured for SSH:
 
 ```bash
@@ -522,8 +530,7 @@ Without `--mock-provider` (alias `--mock`) or `--allow-live`, live provider demo
 dispatch.
 
 The built-in default live provider pool maps all seven agent ids to OpenAI
-`gpt-4o-mini` specs. To use it, provide an OpenAI API key and explicitly enable
-live mode:
+`gpt-4o-mini` specs. **The Sakana checkpoint slot labels (`gpt-5`, `gemini-2.5-pro`, ...) are training metadata, not provider bindings; see [`docs/agent_slot_provider_mapping.md`](docs/agent_slot_provider_mapping.md) for the full mapping contract.** To use the default pool, provide an OpenAI API key and explicitly enable live mode:
 
 ```bash
 XLA_TARGET=cuda12 mix trinity.route.demo \

@@ -182,4 +182,45 @@ defmodule TrinityCoordinator.ProviderPoolTest do
     assert spec.id == 1
     assert spec.provider == :openai
   end
+
+  describe "agent-slot ↔ provider safety assertions (Phase 9)" do
+    test ":default pool declares exactly 7 entries with ids 0..6, no duplicates" do
+      pool = TrinityCoordinator.ProviderPool.fetch!(:default)
+      ids = Enum.map(pool, & &1.id) |> Enum.sort()
+      assert ids == Enum.to_list(0..6)
+      assert Enum.uniq(ids) == ids
+    end
+
+    test ":mock pool declares 7 entries with provider :mock for every slot" do
+      pool = TrinityCoordinator.ProviderPool.fetch!(:mock)
+      assert length(pool) == 7
+      assert Enum.all?(pool, &(&1.provider == :mock))
+      assert Enum.map(pool, & &1.id) |> Enum.sort() == Enum.to_list(0..6)
+    end
+
+    test ":default pool models are explicit binaries (no inference from Sakana labels)" do
+      pool = TrinityCoordinator.ProviderPool.fetch!(:default)
+
+      Enum.each(pool, fn spec ->
+        assert is_binary(spec.model),
+               "slot #{spec.id} has non-binary model: #{inspect(spec.model)}"
+
+        assert spec.model != ""
+      end)
+    end
+
+    test ":default pool's slot 0 does NOT call gpt-5 (no implicit label binding)" do
+      pool = TrinityCoordinator.ProviderPool.fetch!(:default)
+      slot0 = Enum.find(pool, &(&1.id == 0))
+
+      refute slot0.model == "gpt-5",
+             "slot 0 must not implicitly bind to the Sakana 'gpt-5' label; see docs/agent_slot_provider_mapping.md"
+    end
+
+    test ":gemini_cli_asm pool uses :asm provider for all 7 slots" do
+      pool = TrinityCoordinator.ProviderPool.fetch!(:gemini_cli_asm)
+      assert length(pool) == 7
+      assert Enum.all?(pool, &(&1.provider == :asm))
+    end
+  end
 end

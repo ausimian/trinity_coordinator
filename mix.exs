@@ -119,6 +119,7 @@ defmodule TrinityCoordinator.MixProject do
         "docs/coordination_head_variants.md",
         "docs/trace_persistence.md",
         "docs/configurable_provider_pools.md",
+        "docs/agent_slot_provider_mapping.md",
         "docs/provider_smoke_tests.md",
         "CHANGELOG.md",
         "LICENSE"
