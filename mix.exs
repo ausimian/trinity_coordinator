@@ -19,6 +19,7 @@ defmodule TrinityCoordinator.MixProject do
       start_permanent: Mix.env() == :prod,
       package: package(),
       docs: docs(),
+      elixirc_paths: elixirc_paths(Mix.env()),
       dialyzer: [
         plt_add_apps: [:mix],
         plt_file: {:no_warn, "priv/plts/dialyzer.plt"}
@@ -26,6 +27,9 @@ defmodule TrinityCoordinator.MixProject do
       deps: deps()
     ]
   end
+
+  defp elixirc_paths(:test), do: ["lib", "test/support"]
+  defp elixirc_paths(_), do: ["lib"]
 
   def cli do
     [

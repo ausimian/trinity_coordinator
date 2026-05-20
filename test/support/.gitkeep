@@ -1,0 +1,3 @@
+# Phase 1 will populate this directory with TrinityCoordinator.MixHelpersCase
+# and other ExUnit test support modules. Compiled in :test only via
+# elixirc_paths/1 in mix.exs.
