@@ -171,4 +171,71 @@ defmodule TrinityCoordinator.Sakana.Head do
       _ -> nil
     end
   end
+
+  @doc """
+  Validates structural invariants between a built routing-head state and the
+  manifest the head was loaded from.
+
+  Checks two load-bearing invariants for the Sakana-adapted head:
+
+    1. `num_agents + num_roles == manifest["router_head_shape"][0]` (today 10).
+    2. `hidden_size == manifest["router_head_shape"][1]` (today 1024).
+
+  This is the only thing standing between a refreshed Sakana checkpoint with a
+  different agent count and silently mis-sliced agent vs role logits. The
+  manifest's `router_head_shape` is the authoritative size declaration; the
+  built head's dimensions come from `build_routing_state/2` parsing the
+  weights, so when these disagree the artifact has drifted out from under
+  the loader.
+
+  Returns `:ok` on success; raises `ArgumentError` otherwise.
+  """
+  @spec assert_shape_invariants!(map(), map()) :: :ok | no_return()
+  def assert_shape_invariants!(head_state, manifest)
+      when is_map(head_state) and is_map(manifest) do
+    head_shape = manifest_router_head_shape(manifest)
+    %{num_agents: num_agents, num_roles: num_roles, hidden_size: hidden_size} = head_state
+
+    case head_shape do
+      [out_dim, hidden_dim] ->
+        unless num_agents + num_roles == out_dim do
+          raise ArgumentError,
+                "router head shape mismatch: manifest declares output_count=#{out_dim} " <>
+                  "but built head has num_agents=#{num_agents} + num_roles=#{num_roles} = " <>
+                  "#{num_agents + num_roles}"
+        end
+
+        unless hidden_size == hidden_dim do
+          raise ArgumentError,
+                "router head hidden-size mismatch: manifest declares hidden=#{hidden_dim} " <>
+                  "but built head has hidden_size=#{hidden_size}"
+        end
+
+        :ok
+
+      other ->
+        raise ArgumentError,
+              "router head shape in manifest is malformed; expected [out_dim, hidden_dim], got: " <>
+                inspect(other)
+    end
+  end
+
+  defp manifest_router_head_shape(manifest) do
+    shape = Map.get(manifest, "router_head_shape") || semantic_head_shape(manifest)
+
+    case shape do
+      [_, _] = pair -> pair
+      [_ | _] = list -> list
+      _ -> nil
+    end
+  end
+
+  defp semantic_head_shape(manifest) do
+    routing =
+      manifest
+      |> Map.get("python_semantic_manifest", %{})
+      |> Map.get("routing", %{})
+
+    Map.get(routing, "head_shape")
+  end
 end

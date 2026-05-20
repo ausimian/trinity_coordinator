@@ -12,7 +12,7 @@ defmodule TrinityCoordinator.Sakana.Coordinator do
   Provider LLM calls are not performed here.
   """
 
-  alias TrinityCoordinator.{Extractor, Runtime, SLMProfile}
+  alias TrinityCoordinator.{Extractor, Runtime, RuntimeProfile, SLMProfile}
   alias TrinityCoordinator.Sakana.{Artifact, Head}
 
   @type t :: %{
@@ -25,7 +25,8 @@ defmodule TrinityCoordinator.Sakana.Coordinator do
           required(:num_agents) => pos_integer(),
           required(:num_roles) => pos_integer(),
           required(:hidden_size) => pos_integer(),
-          required(:backend) => term()
+          required(:backend) => term(),
+          required(:runtime_profile) => TrinityCoordinator.RuntimeProfile.t()
         }
 
   @doc """
@@ -35,8 +36,17 @@ defmodule TrinityCoordinator.Sakana.Coordinator do
 
     * `:artifact_dir` - defaults to `Artifact.default_output_dir/0`.
     * `:num_roles` - defaults to `3`.
-    * `:backend` - defaults to CUDA.
-    * `:require_cuda` - default `true`.
+    * `:runtime_profile` - a `TrinityCoordinator.RuntimeProfile` name or struct.
+      Defaults to `:cuda_exla` (canonical production lane). The profile
+      determines the Nx backend tuple and whether CUDA must be present.
+    * `:backend` - compatibility override. When supplied, overrides the
+      backend derived from `:runtime_profile`.
+    * `:require_cuda` - compatibility override. When supplied, overrides the
+      profile's `require_cuda?` flag.
+
+  Backward compatibility: callers that pass only `:backend` and
+  `:require_cuda` continue to behave exactly as before — the defaults match the
+  previous CUDA-shaped defaults.
   """
   @spec load(keyword()) :: {:ok, t()} | {:error, term()}
   def load(opts \\ []) when is_list(opts) do
@@ -44,15 +54,25 @@ defmodule TrinityCoordinator.Sakana.Coordinator do
       Keyword.validate!(opts,
         artifact_dir: Artifact.default_output_dir(),
         num_roles: 3,
-        backend: {EXLA.Backend, client: :cuda},
-        require_cuda: true
+        runtime_profile: :cuda_exla,
+        backend: nil,
+        require_cuda: nil
       )
 
-    if opts[:require_cuda] do
+    profile = RuntimeProfile.resolve(opts[:runtime_profile])
+    backend = opts[:backend] || profile.nx_backend
+
+    require_cuda? =
+      case opts[:require_cuda] do
+        nil -> profile.require_cuda?
+        b when is_boolean(b) -> b
+      end
+
+    if require_cuda? do
       Runtime.put_cuda_backend!()
     end
 
-    profile =
+    slm_profile =
       SLMProfile.qwen_coordinator()
       |> Map.put(:adapted_artifact_dir, opts[:artifact_dir])
       |> Map.put(:artifact_patch_options,
@@ -61,14 +81,16 @@ defmodule TrinityCoordinator.Sakana.Coordinator do
         cast_tensors: true
       )
 
-    with {:ok, {model_info, tokenizer}} <- SLMProfile.load_profile(profile),
+    with {:ok, {model_info, tokenizer}} <- SLMProfile.load_profile(slm_profile),
          {:ok, manifest} <- Artifact.load_manifest(opts[:artifact_dir]),
          head_weights <- Artifact.load_router_head!(opts[:artifact_dir], manifest: manifest),
          {:ok, head_state} <-
            Head.build_routing_state(head_weights,
              num_roles: opts[:num_roles],
-             backend: opts[:backend]
-           ) do
+             backend: backend
+           ),
+         :ok <-
+           Head.assert_shape_invariants!(head_state, manifest) do
       {:ok,
        %{
          model_info: model_info,
@@ -80,7 +102,8 @@ defmodule TrinityCoordinator.Sakana.Coordinator do
          num_agents: head_state.num_agents,
          num_roles: head_state.num_roles,
          hidden_size: head_state.hidden_size,
-         backend: opts[:backend]
+         backend: backend,
+         runtime_profile: profile
        }}
     else
       {:error, reason} -> {:error, reason}
