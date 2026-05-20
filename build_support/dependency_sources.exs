@@ -28,7 +28,7 @@ defmodule DependencySources do
     repo_root = Path.expand(repo_root)
     config = load_config!(Path.join(repo_root, "build_support/dependency_sources.config.exs"))
     overrides = load_local_overrides(repo_root)
-    app = normalize_app!(app)
+    app = resolve_app!(app, config)
     dep_config = dep_config_for!(app, config)
     override = local_override(app, overrides)
     source = selected_source!(app, dep_config, override, publish_mode?(), repo_root)
@@ -76,8 +76,38 @@ defmodule DependencySources do
     end
   end
 
+  # Iteration-time normalization: configs are authored with atom keys (Mix
+  # convention) and the only shipped config follows that rule. A binary key
+  # here would have no canonical atom set to resolve against (the iteration
+  # itself is the set), so reject it with a clear error instead of silently
+  # creating an atom from arbitrary input.
   defp normalize_app!(app) when is_atom(app), do: app
-  defp normalize_app!(app) when is_binary(app), do: String.to_atom(app)
+
+  defp normalize_app!(app) when is_binary(app) do
+    raise ArgumentError,
+          "dependency app names in dependency_sources.config.exs must be atoms; " <>
+            "got string #{inspect(app)}"
+  end
+
+  # External resolution: when a caller (e.g. mix.exs or a Mix task) passes an
+  # app name as a binary, look it up against the atom keys already present in
+  # the loaded deps map. No new atoms are created on the BEAM.
+  defp resolve_app!(app, _config) when is_atom(app), do: app
+
+  defp resolve_app!(app, config) when is_binary(app) do
+    config
+    |> deps_config()
+    |> Map.keys()
+    |> Enum.find(fn key -> is_atom(key) and Atom.to_string(key) == app end)
+    |> case do
+      nil ->
+        raise ArgumentError,
+              "dependency #{inspect(app)} is not declared in dependency_sources.config.exs"
+
+      atom ->
+        atom
+    end
+  end
 
   defp normalize_dep_config!(config) when is_map(config), do: config
   defp normalize_dep_config!(config) when is_list(config), do: Map.new(config)
@@ -195,11 +225,27 @@ defmodule DependencySources do
   defp keyword_options(opts) when is_map(opts), do: Map.to_list(opts)
   defp keyword_options(_opts), do: []
 
+  # Explicit static mapping from the supported binary forms to the atoms in
+  # @source_keys. Avoids dynamic atom creation entirely.
   defp normalize_source!(source) when source in @source_keys, do: source
-  defp normalize_source!(source) when is_binary(source), do: String.to_existing_atom(source)
+  defp normalize_source!("path"), do: :path
+  defp normalize_source!("github"), do: :github
+  defp normalize_source!("hex"), do: :hex
 
+  defp normalize_source!(other) do
+    raise ArgumentError, "unknown dependency source: #{inspect(other)}"
+  end
+
+  # Explicit static mapping from the supported binary forms to the atoms in
+  # @github_option_keys. Unknown binaries return nil and are dropped by the
+  # caller's `option_key in @github_option_keys` filter, mirroring how
+  # unknown atom keys are already silently filtered there.
   defp normalize_option_key(key) when is_atom(key), do: key
-  defp normalize_option_key(key) when is_binary(key), do: String.to_existing_atom(key)
+  defp normalize_option_key("branch"), do: :branch
+  defp normalize_option_key("ref"), do: :ref
+  defp normalize_option_key("tag"), do: :tag
+  defp normalize_option_key("subdir"), do: :subdir
+  defp normalize_option_key(_other), do: nil
 
   defp publish_mode? do
     System.argv()
