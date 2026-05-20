@@ -1,4 +1,5 @@
 defmodule TrinityCoordinator.Sakana.PythonImporterTest do
+  alias TrinityCoordinator.Sakana.PythonImporter
   use ExUnit.Case, async: false
 
   alias TrinityCoordinator.Sakana.{Artifact, ExportSpec, PythonImporter}
@@ -487,5 +488,41 @@ defmodule TrinityCoordinator.Sakana.PythonImporterTest do
   defp unique_tmp_dir(prefix) do
     Path.join(System.tmp_dir!(), "#{prefix}_#{System.unique_integer([:positive])}")
     |> tap(&File.mkdir_p!/1)
+  end
+
+  describe "provenance_path/2" do
+    test "in-repo absolute path becomes repo-relative" do
+      repo = "/tmp/repo_root_pi_test"
+      File.mkdir_p!(Path.join(repo, "sub/dir"))
+      File.write!(Path.join(repo, "sub/dir/x.json"), "{}")
+      on_exit(fn -> File.rm_rf!(repo) end)
+
+      abs_path = Path.expand(Path.join(repo, "sub/dir/x.json"))
+
+      assert PythonImporter.provenance_path(abs_path, repo) ==
+               "sub/dir/x.json"
+    end
+
+    test "already-relative path is returned unchanged" do
+      assert PythonImporter.provenance_path(
+               "tmp/some/file.json",
+               "/tmp/anywhere"
+             ) == "tmp/some/file.json"
+    end
+
+    test "out-of-repo absolute path becomes <external>:basename" do
+      assert PythonImporter.provenance_path(
+               "/totally/unrelated/path/external_thing.json",
+               "/tmp/repo_root"
+             ) == "<external>:external_thing.json"
+    end
+
+    test "nil is preserved" do
+      assert PythonImporter.provenance_path(nil, "/anywhere") == nil
+    end
+
+    test "repo root itself maps to current directory" do
+      assert PythonImporter.provenance_path("/tmp/x", "/tmp/x") == "."
+    end
   end
 end

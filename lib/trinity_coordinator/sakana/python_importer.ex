@@ -589,8 +589,8 @@ defmodule TrinityCoordinator.Sakana.PythonImporter do
       "xla_target" => opts.spec.xla_target,
       "export_backend" => "python_semantic_importer_elixir_nx",
       "importer" => inspect(__MODULE__),
-      "python_manifest_path" => opts.python_manifest_path,
-      "reference_manifest_path" => opts.reference_manifest_path,
+      "python_manifest_path" => provenance_path(opts.python_manifest_path, File.cwd!()),
+      "reference_manifest_path" => provenance_path(opts.reference_manifest_path, File.cwd!()),
       "source_vector_path" =>
         deep_get(python_manifest, ["source_vector_path"]) ||
           deep_get(python_manifest, ["source", "router_vector"]) ||
@@ -775,4 +775,35 @@ defmodule TrinityCoordinator.Sakana.PythonImporter do
 
   defp emit(%{progress: progress}, event) when is_function(progress, 1), do: progress.(event)
   defp emit(_opts, _event), do: :ok
+
+  @doc """
+  Normalizes a provenance file path for embedding into a manifest.
+
+  - In-repo absolute paths become repo-relative.
+  - Already-relative paths are returned unchanged.
+  - Out-of-repo absolute paths become a `<external>:basename` sentinel so we
+    do not leak maintainer-local directory structure.
+  - `nil` is preserved.
+  """
+  @spec provenance_path(String.t() | nil, String.t()) :: String.t() | nil
+  def provenance_path(nil, _repo_root), do: nil
+
+  def provenance_path(path, repo_root) when is_binary(path) and is_binary(repo_root) do
+    expanded = Path.expand(path)
+    repo = Path.expand(repo_root)
+
+    cond do
+      String.starts_with?(expanded, repo <> "/") ->
+        Path.relative_to(expanded, repo)
+
+      expanded == repo ->
+        "."
+
+      Path.type(path) == :relative ->
+        path
+
+      true ->
+        "<external>:" <> Path.basename(expanded)
+    end
+  end
 end
