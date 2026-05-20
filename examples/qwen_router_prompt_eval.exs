@@ -19,133 +19,36 @@ defmodule Examples.QwenRouterPromptEval do
     6 => "Qwen/Qwen3-32B (direct)"
   }
 
-  @cases [
-    %{
-      id: "math_direct",
-      expected: %{agent_id: 4, role_id: 2},
-      messages: [
-        %{role: "user", content: "What is 17 + 25? Answer briefly."}
-      ]
-    },
-    %{
-      id: "math_proof",
-      expected: %{agent_id: 0, role_id: 0},
-      messages: [
+  @cases_fixture_path Path.join(["examples", "fixtures", "qwen_router_prompt_eval_cases.json"])
+
+  defp load_cases! do
+    body = File.read!(@cases_fixture_path)
+    doc = Jason.decode!(body)
+
+    cases =
+      Enum.map(doc["cases"], fn c ->
         %{
-          role: "user",
-          content:
-            "Prove that the sum of the first n odd positive integers is n squared. Route this to the best next role."
+          id: c["id"],
+          tags: c["tags"] || [],
+          notes: c["notes"],
+          expected: %{
+            agent_id: c["expected"]["agent_id"],
+            role_id: c["expected"]["role_id"]
+          },
+          messages:
+            Enum.map(c["messages"], fn m ->
+              %{role: m["role"], content: m["content"]}
+            end)
         }
-      ]
-    },
-    %{
-      id: "code_debug",
-      expected: %{agent_id: 0, role_id: 0},
-      messages: [
-        %{
-          role: "user",
-          content:
-            "A Python function mutates its default list argument across calls. Identify the bug and propose the smallest fix."
-        }
-      ]
-    },
-    %{
-      id: "security_review",
-      expected: %{agent_id: 4, role_id: 1},
-      messages: [
-        %{
-          role: "user",
-          content:
-            "Review this login flow for security risks: passwords are hashed, sessions are cookies, and reset tokens never expire."
-        }
-      ]
-    },
-    %{
-      id: "planning",
-      expected: %{agent_id: 4, role_id: 0},
-      messages: [
-        %{
-          role: "user",
-          content:
-            "Create a concise implementation plan for migrating a small Elixir service from in-memory state to Postgres."
-        }
-      ]
-    },
-    %{
-      id: "verification_after_worker",
-      expected: %{agent_id: 4, role_id: 2},
-      messages: [
-        %{role: "user", content: "Calculate 6 * 7 and verify the answer."},
-        %{role: "assistant", content: "Worker answer: 6 * 7 = 42."}
-      ]
-    },
-    %{
-      id: "needs_revision",
-      expected: %{agent_id: 4, role_id: 2},
-      messages: [
-        %{role: "user", content: "Check whether the answer is correct: 19 + 24 = 41."},
-        %{role: "assistant", content: "Worker answer: 19 + 24 = 41."}
-      ]
-    },
-    %{
-      id: "ambiguous_decomposition",
-      expected: %{agent_id: 0, role_id: 2},
-      messages: [
-        %{
-          role: "user",
-          content:
-            "This problem has unclear requirements. We may need to split it into assumptions, risks, and a concrete next action."
-        }
-      ]
-    },
-    %{
-      id: "creative_but_constrained",
-      expected: %{agent_id: 4, role_id: 2},
-      messages: [
-        %{
-          role: "user",
-          content:
-            "Draft a friendly but precise support reply explaining a billing correction. Keep it under 120 words."
-        }
-      ]
-    },
-    %{
-      id: "longer_context",
-      expected: %{agent_id: 4, role_id: 2},
-      messages: [
-        %{
-          role: "system",
-          content:
-            "You are routing work inside a three-role TRINITY loop. Worker solves, Thinker plans or redirects, Verifier checks."
-        },
-        %{
-          role: "user",
-          content:
-            "Given a release checklist, identify the next best role. The feature compiles, unit tests pass, docs changed, but no smoke test has been run yet."
-        }
-      ]
-    },
-    %{
-      id: "provider_failure_triage",
-      expected: %{agent_id: 4, role_id: 2},
-      messages: [
-        %{
-          role: "user",
-          content:
-            "The last provider call timed out after 30 seconds. Decide whether to retry, ask a thinker for a smaller plan, or verify the partial answer."
-        }
-      ]
-    },
-    %{
-      id: "final_answer_check",
-      expected: %{agent_id: 4, role_id: 0},
-      messages: [
-        %{role: "user", content: "Solve and then verify: the capital of France is Paris."},
-        %{role: "assistant", content: "Worker answer: Paris is the capital of France."},
-        %{role: "assistant", content: "Thinker note: this is a factual lookup and likely ready."}
-      ]
-    }
-  ]
+      end)
+
+    {cases, doc["coverage"] || %{}}
+  end
+
+  defp all_cases do
+    {cases, _coverage} = load_cases!()
+    cases
+  end
 
   def main(argv) do
     argv = normalize_argv(argv)
@@ -164,9 +67,14 @@ defmodule Examples.QwenRouterPromptEval do
           artifact_dir: :string,
           case: :keep,
           debug_native_logs: :boolean,
+          determinism_runs: :integer,
           list_cases: :boolean,
+          min_agent_margin: :float,
+          min_role_margin: :float,
           no_assert: :boolean,
           show_logits: :boolean,
+          snapshot: :string,
+          snapshot_out: :string,
           suppress_native_logs_child: :boolean,
           verbose: :boolean
         ]
@@ -242,7 +150,7 @@ defmodule Examples.QwenRouterPromptEval do
   end
 
   defp list_cases do
-    Enum.each(@cases, fn case_spec ->
+    Enum.each(all_cases(), fn case_spec ->
       IO.puts(case_spec.id)
     end)
   end
@@ -256,6 +164,12 @@ defmodule Examples.QwenRouterPromptEval do
     assert? = not Keyword.get(opts, :no_assert, false)
     show_logits? = Keyword.get(opts, :show_logits, false)
     verbose? = Keyword.get(opts, :verbose, false) or show_logits?
+    determinism_runs = max(1, Keyword.get(opts, :determinism_runs, 1))
+    min_agent_margin = Keyword.get(opts, :min_agent_margin)
+    min_role_margin = Keyword.get(opts, :min_role_margin)
+    snapshot_in = Keyword.get(opts, :snapshot)
+    snapshot_out = Keyword.get(opts, :snapshot_out)
+    snapshot_expected = if snapshot_in, do: Jason.decode!(File.read!(snapshot_in)), else: nil
 
     HITL.banner("QWEN ROUTER PROMPT EVAL")
     Runtime.put_cuda_backend!()
@@ -300,11 +214,27 @@ defmodule Examples.QwenRouterPromptEval do
           length(selected_cases),
           assert?,
           show_logits?,
-          verbose?
+          verbose?,
+          min_agent_margin: min_agent_margin,
+          min_role_margin: min_role_margin,
+          snapshot_expected: snapshot_expected
         )
       end)
 
-    failures = Enum.filter(results, &(&1.status == :fail))
+    determinism_failures =
+      if determinism_runs > 1 do
+        verify_determinism!(coordinator, selected_cases, results, determinism_runs)
+      else
+        []
+      end
+
+    if snapshot_out do
+      write_snapshot!(results, snapshot_out)
+    end
+
+    failures =
+      Enum.filter(results, &(&1.status == :fail)) ++
+        Enum.map(determinism_failures, fn id -> %{id: id, status: :fail} end)
 
     if failures == [] do
       print_summary(results)
@@ -314,10 +244,10 @@ defmodule Examples.QwenRouterPromptEval do
     end
   end
 
-  defp select_cases!([]), do: @cases
+  defp select_cases!([]), do: all_cases()
 
   defp select_cases!(ids) do
-    cases_by_id = Map.new(@cases, &{&1.id, &1})
+    cases_by_id = Map.new(all_cases(), &{&1.id, &1})
 
     Enum.map(ids, fn id ->
       Map.get(cases_by_id, id) || raise("Unknown case #{inspect(id)}. Run with --list-cases.")
@@ -335,23 +265,103 @@ defmodule Examples.QwenRouterPromptEval do
     end
   end
 
-  defp route_case!(coordinator, case_spec, index, total, assert?, show_logits?, verbose?) do
+  defp route_case!(coordinator, case_spec, index, total, assert?, show_logits?, verbose?, extras)
+       when is_list(extras) do
     {:ok, routed} = Coordinator.route_messages(coordinator, case_spec.messages)
 
     route = routed.route
     expected = case_spec.expected
     actual = %{agent_id: route.agent_id, role_id: route.role_id}
 
+    agent_logits_list = Nx.to_flat_list(route.agent_logits)
+    role_logits_list = Nx.to_flat_list(route.role_logits)
+    agent_margin = top_margin(route.agent_logits)
+    role_margin = top_margin(route.role_logits)
+
+    snapshot_expected = Keyword.get(extras, :snapshot_expected)
+    min_agent_margin = Keyword.get(extras, :min_agent_margin)
+    min_role_margin = Keyword.get(extras, :min_role_margin)
+
+    transcript_hash =
+      case_spec.messages
+      |> :erlang.term_to_binary([:compressed])
+      |> then(&:crypto.hash(:sha256, &1))
+      |> Base.encode16(case: :lower)
+
+    token_count = routed.extraction.input_ids |> Nx.to_flat_list() |> length()
+
     status =
       cond do
-        not assert? -> :report
-        expectation_matches?(expected, actual) -> :ok
-        true -> :fail
+        not assert? ->
+          :report
+
+        not expectation_matches?(expected, actual) ->
+          :fail
+
+        not margin_ok?(:agent, agent_margin, min_agent_margin) ->
+          :fail
+
+        not margin_ok?(:role, role_margin, min_role_margin) ->
+          :fail
+
+        not snapshot_ok?(
+          case_spec.id,
+          route.agent_id,
+          route.role_id,
+          token_count,
+          transcript_hash,
+          snapshot_expected
+        ) ->
+          :fail
+
+        true ->
+          :ok
       end
 
     print_case(case_spec, routed, index, total, status, show_logits?, verbose?)
 
-    %{id: case_spec.id, status: status, role_id: route.role_id, agent_id: route.agent_id}
+    %{
+      id: case_spec.id,
+      status: status,
+      role_id: route.role_id,
+      agent_id: route.agent_id,
+      agent_margin: agent_margin,
+      role_margin: role_margin,
+      agent_logits_rounded: Enum.map(agent_logits_list, &Float.round(&1, 6)),
+      role_logits_rounded: Enum.map(role_logits_list, &Float.round(&1, 6)),
+      token_count: token_count,
+      transcript_hash: transcript_hash,
+      route_hash: route_hash(route)
+    }
+  end
+
+  defp margin_ok?(_kind, _margin, nil), do: true
+  defp margin_ok?(_kind, :infinity, _min), do: true
+  defp margin_ok?(_kind, margin, min) when is_number(margin) and is_number(min), do: margin >= min
+  defp margin_ok?(_, _, _), do: false
+
+  # Snapshot assertion semantics. Asserts decision-stable invariants only:
+  # agent_id, role_id, token_count, transcript_hash. Raw logits are recorded
+  # in the snapshot for diagnostic use but not asserted, because CUDA kernel
+  # selection and JIT compilation cause O(1) drift in raw logits across
+  # process launches even when argmax is bytewise stable within a single
+  # process. In-process logit stability is covered by `--determinism-runs N`.
+  defp snapshot_ok?(_id, _agent_id, _role_id, _token_count, _transcript_hash, nil), do: true
+
+  defp snapshot_ok?(id, agent_id, role_id, token_count, transcript_hash, snapshot)
+       when is_map(snapshot) do
+    expected_case = Enum.find(snapshot["cases"] || [], &(&1["id"] == id))
+
+    case expected_case do
+      nil ->
+        true
+
+      e ->
+        e["agent_id"] == agent_id and
+          e["role_id"] == role_id and
+          e["token_count"] == token_count and
+          e["transcript_hash"] == transcript_hash
+    end
   end
 
   defp expectation_matches?(expected, actual) do
@@ -474,6 +484,64 @@ defmodule Examples.QwenRouterPromptEval do
 
   defp format_float(value) when is_float(value), do: :erlang.float_to_binary(value, decimals: 5)
   defp format_float(value), do: inspect(value)
+
+  defp write_snapshot!(results, path) do
+    File.mkdir_p!(Path.dirname(path))
+
+    payload = %{
+      "schema_version" => 1,
+      "generated_at" => DateTime.utc_now() |> DateTime.to_iso8601(),
+      "cases" =>
+        Enum.map(results, fn r ->
+          %{
+            "id" => r.id,
+            "agent_id" => r.agent_id,
+            "role_id" => r.role_id,
+            "token_count" => Map.get(r, :token_count),
+            "agent_margin" => Map.get(r, :agent_margin),
+            "role_margin" => Map.get(r, :role_margin),
+            "agent_logits_rounded" => Map.get(r, :agent_logits_rounded),
+            "role_logits_rounded" => Map.get(r, :role_logits_rounded),
+            "transcript_hash" => Map.get(r, :transcript_hash),
+            "route_hash" => Map.get(r, :route_hash)
+          }
+        end)
+    }
+
+    File.write!(path, Jason.encode!(payload, pretty: true))
+    IO.puts("\nSnapshot written: #{path} (#{length(results)} cases)")
+  end
+
+  defp verify_determinism!(coordinator, cases, baseline_results, runs) when runs > 1 do
+    baseline = Map.new(baseline_results, fn r -> {r.id, r.route_hash} end)
+
+    Enum.reduce(2..runs, [], fn run_index, mismatches ->
+      Enum.reduce(cases, mismatches, fn case_spec, acc ->
+        {:ok, %{route: route}} = Coordinator.route_messages(coordinator, case_spec.messages)
+        hash = route_hash(route)
+
+        if baseline[case_spec.id] == hash do
+          acc
+        else
+          IO.puts("  determinism mismatch case=#{case_spec.id} run=#{run_index}")
+          [case_spec.id | acc]
+        end
+      end)
+    end)
+  end
+
+  defp route_hash(route) do
+    payload = [
+      route.agent_id,
+      route.role_id,
+      route.logits |> Nx.to_flat_list() |> Enum.map(&Float.round(&1, 6))
+    ]
+
+    payload
+    |> :erlang.term_to_binary([:compressed])
+    |> then(&:crypto.hash(:sha256, &1))
+    |> Base.encode16(case: :lower)
+  end
 end
 
 Examples.QwenRouterPromptEval.main(System.argv())

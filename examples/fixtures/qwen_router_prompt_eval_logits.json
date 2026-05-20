@@ -1,0 +1,894 @@
+{
+  "cases": [
+    {
+      "agent_id": 4,
+      "agent_logits_rounded": [
+        15.854443,
+        9.122092,
+        4.819489,
+        0.056395,
+        30.22077,
+        -23.630211,
+        10.418853
+      ],
+      "agent_margin": 14.366327285766602,
+      "id": "math_direct",
+      "role_id": 2,
+      "role_logits_rounded": [
+        -7.696819,
+        -15.208102,
+        4.941882
+      ],
+      "role_margin": 12.638701438903809,
+      "route_hash": "a6f10d75a70ca4bca93f1c3a689365f28bcc9b293e25ac9643166dc980efcefe",
+      "token_count": 15,
+      "transcript_hash": "05485d3e42e7b2e0c63bad13d446915173499b5a9a980faff24195c33bdbf0b3"
+    },
+    {
+      "agent_id": 0,
+      "agent_logits_rounded": [
+        27.464951,
+        -0.217723,
+        7.36272,
+        10.577598,
+        21.427399,
+        -19.671074,
+        10.922189
+      ],
+      "agent_margin": 6.0375518798828125,
+      "id": "math_proof",
+      "role_id": 0,
+      "role_logits_rounded": [
+        7.059682,
+        -4.148517,
+        -6.204783
+      ],
+      "role_margin": 11.208198547363281,
+      "route_hash": "abc3b3c181c9c554f3368dc6a3b5e917b3edc722d162a01a7e72c05928afcfe2",
+      "token_count": 26,
+      "transcript_hash": "afeeea5e91c8341822a43dd3f2699f4ef643e8fce5aea62d1791f9a9f377b525"
+    },
+    {
+      "agent_id": 0,
+      "agent_logits_rounded": [
+        31.919542,
+        9.6828,
+        5.820169,
+        2.658678,
+        23.313501,
+        -16.619198,
+        10.157958
+      ],
+      "agent_margin": 8.606040954589844,
+      "id": "code_debug",
+      "role_id": 0,
+      "role_logits_rounded": [
+        5.454797,
+        -4.663832,
+        -2.756069
+      ],
+      "role_margin": 8.21086597442627,
+      "route_hash": "189d7bda54b89fe96a9d294e30feb25c6273f3da50cd67475ecd3fbf10a7bc9f",
+      "token_count": 23,
+      "transcript_hash": "ffd5c117ec6d38581c7f54cb7cc66382ada07a72c810efbe580908a1f973d38e"
+    },
+    {
+      "agent_id": 4,
+      "agent_logits_rounded": [
+        25.86874,
+        8.863882,
+        5.985313,
+        4.458414,
+        30.944736,
+        -27.863979,
+        8.953686
+      ],
+      "agent_margin": 5.075996398925781,
+      "id": "security_review",
+      "role_id": 1,
+      "role_logits_rounded": [
+        -9.47543,
+        -6.291026,
+        -8.185234
+      ],
+      "role_margin": 1.8942084312438965,
+      "route_hash": "c18a3121b61c46c0cf6424a94604060af4c724fa86af996d6412240470be8737",
+      "token_count": 24,
+      "transcript_hash": "6ebc86ceb849d23a530c0761a826bd0768395390592c26750cf0fc0f184db660"
+    },
+    {
+      "agent_id": 4,
+      "agent_logits_rounded": [
+        6.181505,
+        1.103109,
+        2.563895,
+        -9.62961,
+        21.199701,
+        -24.668354,
+        6.965815
+      ],
+      "agent_margin": 14.233886241912842,
+      "id": "planning",
+      "role_id": 0,
+      "role_logits_rounded": [
+        6.877336,
+        -0.175948,
+        -12.090677
+      ],
+      "role_margin": 7.053283214569092,
+      "route_hash": "f324dd162f7eb89528a13bfa35279430f61b8001d84ca6eacad6b35e22a016e7",
+      "token_count": 22,
+      "transcript_hash": "d1d2c35f70fb0f600aaf06670bd21730c24debd365cdcb5a7741b0a1f42b9d02"
+    },
+    {
+      "agent_id": 4,
+      "agent_logits_rounded": [
+        23.744213,
+        6.338471,
+        -1.492303,
+        19.180084,
+        28.680689,
+        -28.842039,
+        14.432146
+      ],
+      "agent_margin": 4.93647575378418,
+      "id": "verification_after_worker",
+      "role_id": 2,
+      "role_logits_rounded": [
+        1.095396,
+        -15.29812,
+        6.054179
+      ],
+      "role_margin": 4.958783149719238,
+      "route_hash": "891a96e256a5a0f2d09001033f0e1f684c73c393d3dec87e5c0e2968e40843bf",
+      "token_count": 28,
+      "transcript_hash": "4148c88c6459832c10e9c6e2e5dd9222a04fa28a8ca4df657d5108ec828f5f1f"
+    },
+    {
+      "agent_id": 4,
+      "agent_logits_rounded": [
+        22.978909,
+        1.917814,
+        3.41497,
+        16.427553,
+        33.47641,
+        -31.360554,
+        18.862453
+      ],
+      "agent_margin": 10.497501373291016,
+      "id": "needs_revision",
+      "role_id": 2,
+      "role_logits_rounded": [
+        -9.580088,
+        -3.618114,
+        5.828707
+      ],
+      "role_margin": 9.446820735931396,
+      "route_hash": "4bb99a2055e231308889c669e0940603dc735b7dfd96b70549507e951472b442",
+      "token_count": 38,
+      "transcript_hash": "49adb085a35723d2218e9dd040b18be0ff21b6033774cf3e86aff45aeb25e643"
+    },
+    {
+      "agent_id": 0,
+      "agent_logits_rounded": [
+        27.368465,
+        8.021806,
+        9.617124,
+        -1.557444,
+        21.355663,
+        -15.430277,
+        0.0641
+      ],
+      "agent_margin": 6.0128021240234375,
+      "id": "ambiguous_decomposition",
+      "role_id": 2,
+      "role_logits_rounded": [
+        -5.210312,
+        -2.375775,
+        3.303683
+      ],
+      "role_margin": 5.679458141326904,
+      "route_hash": "ef0f3142f2a1b7d992dfc0b5f1d6e2db083d0f5cf69ea7d70da74ba0d89ae2fb",
+      "token_count": 25,
+      "transcript_hash": "6910886c8f59b79059eb887cd7d9bb797be712f5631353ce8da76978124d2bb2"
+    },
+    {
+      "agent_id": 4,
+      "agent_logits_rounded": [
+        23.169374,
+        16.309473,
+        -9.413595,
+        6.851436,
+        27.908249,
+        -25.884394,
+        1.496437
+      ],
+      "agent_margin": 4.738874435424805,
+      "id": "creative_but_constrained",
+      "role_id": 2,
+      "role_logits_rounded": [
+        -10.578327,
+        -14.581831,
+        0.009375
+      ],
+      "role_margin": 10.587702512741089,
+      "route_hash": "f3bef2495e62da9c29f2f54c66568bb75022253263def2026f4bc95750ea230b",
+      "token_count": 23,
+      "transcript_hash": "84a6179253e5bbd3d36fe4559dba0647c77e6a452b58d5e94aded5149bb8bf51"
+    },
+    {
+      "agent_id": 4,
+      "agent_logits_rounded": [
+        24.039293,
+        13.308648,
+        2.388436,
+        7.207932,
+        25.791286,
+        -20.407728,
+        6.724172
+      ],
+      "agent_margin": 1.751993179321289,
+      "id": "longer_context",
+      "role_id": 2,
+      "role_logits_rounded": [
+        -9.406671,
+        -16.100044,
+        -2.75982
+      ],
+      "role_margin": 6.646850109100342,
+      "route_hash": "a17d620701d4d491611cf1138430c70183c689fcf587e710dc6aebb388256868",
+      "token_count": 62,
+      "transcript_hash": "ba5e1992d45288255858413d3f3b32e598299055e41910a4b403fc1964a1acc9"
+    },
+    {
+      "agent_id": 4,
+      "agent_logits_rounded": [
+        21.634499,
+        19.798851,
+        1.69697,
+        0.823542,
+        25.317719,
+        -14.299841,
+        4.523949
+      ],
+      "agent_margin": 3.6832199096679688,
+      "id": "provider_failure_triage",
+      "role_id": 2,
+      "role_logits_rounded": [
+        -7.090622,
+        -10.050245,
+        1.607117
+      ],
+      "role_margin": 8.697738647460938,
+      "route_hash": "b79f540baac360319642e401f116e5080728cc8118799bdbdd4deb48ed969bab",
+      "token_count": 33,
+      "transcript_hash": "edd9fa2a5ab6ddec1925bbafca487aa9de81cdb694a1d4742e08e870154bbf54"
+    },
+    {
+      "agent_id": 4,
+      "agent_logits_rounded": [
+        19.194838,
+        -1.149363,
+        7.140558,
+        3.320011,
+        22.319866,
+        -12.333289,
+        -1.408408
+      ],
+      "agent_margin": 3.125028610229492,
+      "id": "final_answer_check",
+      "role_id": 0,
+      "role_logits_rounded": [
+        6.940457,
+        -10.359452,
+        -0.288698
+      ],
+      "role_margin": 7.22915506362915,
+      "route_hash": "18a95832dce2a425f5237c81c2ced45ff120f705612e44b78dd0b06e8553ebc1",
+      "token_count": 41,
+      "transcript_hash": "ff28995b6eeff38d503f9e73973e067fbf6b292d6a656103bb51e156b9648cc2"
+    },
+    {
+      "agent_id": 0,
+      "agent_logits_rounded": [
+        29.905825,
+        1.218243,
+        4.53939,
+        3.505795,
+        24.074596,
+        -19.08744,
+        8.662705
+      ],
+      "agent_margin": 5.831228256225586,
+      "id": "latex_math",
+      "role_id": 2,
+      "role_logits_rounded": [
+        -5.613734,
+        -6.106069,
+        -3.987858
+      ],
+      "role_margin": 1.6258761882781982,
+      "route_hash": "782545b2559cf44e8d3fb46f87069dae759ffa6012216be4a9b681a9f44417e4",
+      "token_count": 16,
+      "transcript_hash": "678fbd7fe9275004098919a7cd63189ae1bf4a34c337b59353639f40485416b9"
+    },
+    {
+      "agent_id": 4,
+      "agent_logits_rounded": [
+        18.483145,
+        1.930513,
+        -2.684714,
+        7.173606,
+        28.649271,
+        -8.081472,
+        5.810249
+      ],
+      "agent_margin": 10.166126251220703,
+      "id": "sql_query",
+      "role_id": 0,
+      "role_logits_rounded": [
+        3.366788,
+        -10.725012,
+        -10.33984
+      ],
+      "role_margin": 13.706627607345581,
+      "route_hash": "d78a8b8d2ee20ea14617070a760b1194d5f6bae9baae84283f0c635d9032bf91",
+      "token_count": 25,
+      "transcript_hash": "d0f00c480717e7c8717e99e2eb22f233c895658283416f5d80d984aa363aadf8"
+    },
+    {
+      "agent_id": 0,
+      "agent_logits_rounded": [
+        30.297287,
+        2.347561,
+        -8.060652,
+        9.455188,
+        23.331388,
+        -7.273642,
+        6.642926
+      ],
+      "agent_margin": 6.965898513793945,
+      "id": "haskell_types",
+      "role_id": 1,
+      "role_logits_rounded": [
+        -13.369574,
+        1.125337,
+        -15.223945
+      ],
+      "role_margin": 14.494910717010498,
+      "route_hash": "9d11a2b7d386960de1a73350e78bb16c468106c9f184b29f8ad55570ab3675f1",
+      "token_count": 22,
+      "transcript_hash": "00382d6a3528959b70c294ed7e10de6734847e364e73aa088d9121039bb57a39"
+    },
+    {
+      "agent_id": 0,
+      "agent_logits_rounded": [
+        26.803827,
+        12.065149,
+        -4.692773,
+        4.666052,
+        20.90099,
+        -19.18029,
+        5.088163
+      ],
+      "agent_margin": 5.902837753295898,
+      "id": "distributed_systems",
+      "role_id": 0,
+      "role_logits_rounded": [
+        2.046618,
+        -1.648505,
+        -4.908296
+      ],
+      "role_margin": 3.695122718811035,
+      "route_hash": "3c3c5f563624d7755ba4a2c99250b163dfd5b7854ef45cf10485438fba7905a7",
+      "token_count": 27,
+      "transcript_hash": "a455304b9ec9a7e4e815aa3e4c5dd7dd35034727356130a1f10a90d46954206a"
+    },
+    {
+      "agent_id": 0,
+      "agent_logits_rounded": [
+        24.233288,
+        12.550163,
+        2.543861,
+        10.126668,
+        23.762314,
+        -14.995603,
+        2.935207
+      ],
+      "agent_margin": 0.4709739685058594,
+      "id": "performance_question",
+      "role_id": 2,
+      "role_logits_rounded": [
+        -7.848959,
+        -10.673456,
+        3.145387
+      ],
+      "role_margin": 10.994346141815186,
+      "route_hash": "80b69e555f25e43676faa136748cc19c883cfc2305e0014de24b1a8170ecde67",
+      "token_count": 38,
+      "transcript_hash": "824d3fc70e8f7a29e4f0f7d889db88442db38eee0a76ecda63bb4b62bae1d584"
+    },
+    {
+      "agent_id": 4,
+      "agent_logits_rounded": [
+        17.767471,
+        14.31498,
+        5.217824,
+        8.242716,
+        23.010162,
+        -24.513756,
+        9.804823
+      ],
+      "agent_margin": 5.2426910400390625,
+      "id": "customer_apology",
+      "role_id": 2,
+      "role_logits_rounded": [
+        -8.107282,
+        -9.314527,
+        4.760195
+      ],
+      "role_margin": 12.86747694015503,
+      "route_hash": "0f57b20aaeb3edee2b8c2547cf18279ce16efe29c37328a471659490163edebf",
+      "token_count": 37,
+      "transcript_hash": "cb2eea1aaa777e3147903fdb87adcec10520e4e955c703a1d6c695bbf0171eeb"
+    },
+    {
+      "agent_id": 0,
+      "agent_logits_rounded": [
+        25.167114,
+        10.396599,
+        -5.9151,
+        10.222354,
+        13.071239,
+        -8.443013,
+        2.771679
+      ],
+      "agent_margin": 12.095874786376953,
+      "id": "product_decision",
+      "role_id": 2,
+      "role_logits_rounded": [
+        -4.697417,
+        -12.487025,
+        -1.889308
+      ],
+      "role_margin": 2.8081092834472656,
+      "route_hash": "ed98367b3adedd707825a6b5580233fe9e01692703cafa954826e2e667a9889c",
+      "token_count": 32,
+      "transcript_hash": "4615b0fc682b9eee7527cff98967822e4dedc0e2aaaa0fd8a4ad7c15b2d40298"
+    },
+    {
+      "agent_id": 4,
+      "agent_logits_rounded": [
+        17.584797,
+        9.452707,
+        7.686206,
+        11.862827,
+        21.757788,
+        -12.214591,
+        0.477239
+      ],
+      "agent_margin": 4.172990798950195,
+      "id": "empty_response",
+      "role_id": 0,
+      "role_logits_rounded": [
+        2.334412,
+        -10.685808,
+        -0.04019
+      ],
+      "role_margin": 2.3746014833450317,
+      "route_hash": "42196763d12df46bb65ae69fad462b3c2135427a3f6ea8d6edafec6abc166e68",
+      "token_count": 31,
+      "transcript_hash": "c2c51d3c303f7e336326993d701ea98e592505f93fc5dd985d2788f294ef6fbf"
+    },
+    {
+      "agent_id": 4,
+      "agent_logits_rounded": [
+        18.409901,
+        -2.994368,
+        -3.154124,
+        3.370653,
+        23.270397,
+        -16.031824,
+        11.591436
+      ],
+      "agent_margin": 4.860496520996094,
+      "id": "verify_simple",
+      "role_id": 2,
+      "role_logits_rounded": [
+        1.045439,
+        -19.387428,
+        4.966904
+      ],
+      "role_margin": 3.921465039253235,
+      "route_hash": "b2e42bd1ae723c85111e9fe4db7a5aa0cf274a2a208a57e7312f7078b553aa0d",
+      "token_count": 32,
+      "transcript_hash": "10cf2687705777c060200b0bb03ecd193b0a98c86f310f646073382241aea3d8"
+    },
+    {
+      "agent_id": 0,
+      "agent_logits_rounded": [
+        36.473553,
+        11.286445,
+        -2.170903,
+        7.647766,
+        24.411034,
+        -9.654595,
+        10.405201
+      ],
+      "agent_margin": 12.062519073486328,
+      "id": "thinker_breakdown",
+      "role_id": 0,
+      "role_logits_rounded": [
+        2.096843,
+        0.299028,
+        0.023013
+      ],
+      "role_margin": 1.7978146076202393,
+      "route_hash": "52951e1b590c069408146870a25b78df7ebbc3eef45fdd5192767162796008e3",
+      "token_count": 21,
+      "transcript_hash": "c386d35aedb2f53bfef641732595c3e800ec18d877a13f7e4a544cdf0f06ecf8"
+    },
+    {
+      "agent_id": 4,
+      "agent_logits_rounded": [
+        20.741262,
+        9.306005,
+        -0.023823,
+        7.339108,
+        23.586262,
+        -6.840367,
+        3.900394
+      ],
+      "agent_margin": 2.844999313354492,
+      "id": "refactor_smell",
+      "role_id": 0,
+      "role_logits_rounded": [
+        0.450063,
+        -12.853561,
+        -6.994362
+      ],
+      "role_margin": 7.444425106048584,
+      "route_hash": "3ff6aecf97dd1c7b98f6c51424813c82a08a03ded57a2a6a7039027593a11d73",
+      "token_count": 26,
+      "transcript_hash": "56a35bd717c062ecf6d478e5ed778897f5302e4904435edfa8fce20922755fd5"
+    },
+    {
+      "agent_id": 0,
+      "agent_logits_rounded": [
+        27.404222,
+        6.060576,
+        -0.815515,
+        -5.505295,
+        25.612045,
+        -18.467819,
+        8.317226
+      ],
+      "agent_margin": 1.7921772003173828,
+      "id": "unicode_normalization",
+      "role_id": 0,
+      "role_logits_rounded": [
+        4.940052,
+        -6.399142,
+        -5.251636
+      ],
+      "role_margin": 10.191688060760498,
+      "route_hash": "eafa80d0c070e58d328c954a4e8f40e95593f738ff1dfb050f83916f1f68f248",
+      "token_count": 22,
+      "transcript_hash": "895d34742d7deb4ab3337eab09a0d66c17c7a22d48041fef7fb7ed198206c630"
+    },
+    {
+      "agent_id": 4,
+      "agent_logits_rounded": [
+        17.800043,
+        1.496372,
+        5.489954,
+        9.961456,
+        27.250702,
+        -33.612644,
+        12.028855
+      ],
+      "agent_margin": 9.450658798217773,
+      "id": "contradiction",
+      "role_id": 0,
+      "role_logits_rounded": [
+        3.188053,
+        -16.078156,
+        0.338902
+      ],
+      "role_margin": 2.849151611328125,
+      "route_hash": "129379cead10eb526032b8ba84b2ee4cc3dfb88af1055b0cd2546f0615b545e8",
+      "token_count": 38,
+      "transcript_hash": "c9dba69e5d98d23272c893b0057207be2fb1b04d403780ba237955e2b89a6c8d"
+    },
+    {
+      "agent_id": 4,
+      "agent_logits_rounded": [
+        16.810957,
+        -0.672337,
+        1.463539,
+        16.553816,
+        18.917587,
+        -25.878689,
+        5.771757
+      ],
+      "agent_margin": 2.106630325317383,
+      "id": "hypothesis_design",
+      "role_id": 0,
+      "role_logits_rounded": [
+        2.269555,
+        -17.161171,
+        -1.965931
+      ],
+      "role_margin": 4.235485553741455,
+      "route_hash": "e370f2a23f759563c945e741e1c825dfccdbf085870ed06613a555555f10a375",
+      "token_count": 31,
+      "transcript_hash": "0fa4cefebf8cbeed968bf82fa7bccba16d7d989e3786e82c6cf9bc6c4d1ef7ec"
+    },
+    {
+      "agent_id": 0,
+      "agent_logits_rounded": [
+        16.095631,
+        5.627423,
+        -3.559071,
+        -0.985255,
+        13.325069,
+        -26.152214,
+        11.185691
+      ],
+      "agent_margin": 2.7705612182617188,
+      "id": "escalate_to_human",
+      "role_id": 1,
+      "role_logits_rounded": [
+        0.907517,
+        5.691183,
+        4.230076
+      ],
+      "role_margin": 1.4611072540283203,
+      "route_hash": "221fedbe6e394e9629a8bad4bcec8b75d8eb8c6477a20acfb4fb763742135861",
+      "token_count": 15,
+      "transcript_hash": "a8dcfd3284f542ab134ec399aafd4795220aafe799b8408da93850356c79c3dc"
+    },
+    {
+      "agent_id": 0,
+      "agent_logits_rounded": [
+        30.39632,
+        11.079621,
+        4.734725,
+        8.030341,
+        25.53278,
+        -19.292507,
+        0.847275
+      ],
+      "agent_margin": 4.8635406494140625,
+      "id": "long_system_prompt",
+      "role_id": 1,
+      "role_logits_rounded": [
+        -2.306009,
+        -0.550712,
+        -3.673924
+      ],
+      "role_margin": 1.7552974224090576,
+      "route_hash": "00b380fc1c700466cc7c16f81c7b69e4d0371c76e2e2325dd20aedae38c2dd16",
+      "token_count": 65,
+      "transcript_hash": "8d24d745e226b64546ad821dca0f36be348a8e8884a60755fef3a76ac6a536c3"
+    },
+    {
+      "agent_id": 4,
+      "agent_logits_rounded": [
+        24.285505,
+        4.471305,
+        10.063199,
+        11.449359,
+        25.070847,
+        -24.373001,
+        10.15774
+      ],
+      "agent_margin": 0.7853412628173828,
+      "id": "two_assistant_turns",
+      "role_id": 0,
+      "role_logits_rounded": [
+        -1.048039,
+        -6.440896,
+        -7.938582
+      ],
+      "role_margin": 5.392856597900391,
+      "route_hash": "39a669e4d7128cd342af85d12ade99ac699dfa865a27612ddd93ed7ad97104c5",
+      "token_count": 40,
+      "transcript_hash": "5a9317c0614250ad8540b430e906fd4de25c8dce7f96b81d47c21e138e6f926c"
+    },
+    {
+      "agent_id": 1,
+      "agent_logits_rounded": [
+        17.659777,
+        21.039188,
+        -1.09818,
+        9.674442,
+        20.737692,
+        -22.286005,
+        0.923051
+      ],
+      "agent_margin": 0.3014965057373047,
+      "id": "unicode_emoji",
+      "role_id": 0,
+      "role_logits_rounded": [
+        -2.477423,
+        -11.268875,
+        -4.269085
+      ],
+      "role_margin": 1.7916622161865234,
+      "route_hash": "c7c009844c44c11b6bde4537d673937c286598b937165b1e474b53bdf24bd4f8",
+      "token_count": 20,
+      "transcript_hash": "e5605befa6b794259d9bf3b02b3b002262b9f7d3ee0928900953980e2c15bcfd"
+    },
+    {
+      "agent_id": 4,
+      "agent_logits_rounded": [
+        14.615459,
+        11.96179,
+        -2.630189,
+        1.065369,
+        20.356741,
+        -17.435165,
+        6.717812
+      ],
+      "agent_margin": 5.741281509399414,
+      "id": "creative_request",
+      "role_id": 2,
+      "role_logits_rounded": [
+        -6.96352,
+        -14.327766,
+        9.292604
+      ],
+      "role_margin": 16.25612449645996,
+      "route_hash": "12a349d34899b2c43c6ebbc0b4e5f535a76fb10026800fe59338285c6274ce1b",
+      "token_count": 23,
+      "transcript_hash": "f4a8a361099dca9ff7c20f09eabed7694cf301e4c0a09a38b02fc6c3a27bc552"
+    },
+    {
+      "agent_id": 0,
+      "agent_logits_rounded": [
+        18.281498,
+        1.10577,
+        -12.475652,
+        -1.375387,
+        17.002882,
+        -28.234612,
+        -0.378893
+      ],
+      "agent_margin": 1.278615951538086,
+      "id": "empty_user",
+      "role_id": 2,
+      "role_logits_rounded": [
+        -2.90334,
+        -10.927056,
+        3.683424
+      ],
+      "role_margin": 6.586764812469482,
+      "route_hash": "ccf23046dcc0a9ada6843c2e6de6bbdd3f67d4c0faad9fb424d95b10b4df1981",
+      "token_count": 3,
+      "transcript_hash": "2dab4769442a30d79ffcadc3b720ca68a6e2e4dcfd118a0e2828deb395d4731e"
+    },
+    {
+      "agent_id": 0,
+      "agent_logits_rounded": [
+        32.189281,
+        19.318577,
+        -7.990181,
+        -10.237064,
+        23.060102,
+        -33.038315,
+        0.449813
+      ],
+      "agent_margin": 9.129179000854492,
+      "id": "strategic_tradeoff",
+      "role_id": 0,
+      "role_logits_rounded": [
+        4.492024,
+        -5.506483,
+        -0.830496
+      ],
+      "role_margin": 5.3225202560424805,
+      "route_hash": "11a3f1891775365c68b476aaf372f73c2b65b1495c359415267c0f7fa532f403",
+      "token_count": 20,
+      "transcript_hash": "d55338bdd7901f5e118cf3563bbd4fad64bb7ffb000466d99349ac9c638ed2f5"
+    },
+    {
+      "agent_id": 0,
+      "agent_logits_rounded": [
+        23.957981,
+        14.795077,
+        -0.283678,
+        8.9807,
+        14.785135,
+        -14.033236,
+        5.700222
+      ],
+      "agent_margin": 9.162903785705566,
+      "id": "root_cause",
+      "role_id": 2,
+      "role_logits_rounded": [
+        1.074108,
+        -6.426394,
+        2.409286
+      ],
+      "role_margin": 1.3351774215698242,
+      "route_hash": "7743f6191d108fbd93b413380c152ace14d9450719bb591d2bedcd2a7c7a03ee",
+      "token_count": 24,
+      "transcript_hash": "88224b4da2cd840975402ee9c1a10531b1b9a07f34986b6c4a095e2ea70b4c4d"
+    },
+    {
+      "agent_id": 0,
+      "agent_logits_rounded": [
+        24.036755,
+        9.607124,
+        2.554105,
+        -3.055452,
+        22.704071,
+        -22.803942,
+        -0.47147
+      ],
+      "agent_margin": 1.3326835632324219,
+      "id": "architectural_decision",
+      "role_id": 0,
+      "role_logits_rounded": [
+        -2.991965,
+        -5.26734,
+        -8.051374
+      ],
+      "role_margin": 2.2753748893737793,
+      "route_hash": "4be032cf3a9f176e8cad661f4caad3020ca891fd7eea9a6985e64e1ec2593dd5",
+      "token_count": 37,
+      "transcript_hash": "7f506003797f79a6116f4cda8b68829d6eb7dfc52e1c7ff5af5dc14af2b3bf2f"
+    },
+    {
+      "agent_id": 0,
+      "agent_logits_rounded": [
+        19.402998,
+        9.864657,
+        -6.955774,
+        -3.545087,
+        4.358183,
+        -17.148401,
+        -0.610608
+      ],
+      "agent_margin": 9.53834056854248,
+      "id": "risk_assessment",
+      "role_id": 0,
+      "role_logits_rounded": [
+        1.67268,
+        -13.768943,
+        -0.267082
+      ],
+      "role_margin": 1.9397623538970947,
+      "route_hash": "24dea27d69c50b6807e2da1c1cd2edc72867b4cf333b791ad24347927ed7b22a",
+      "token_count": 26,
+      "transcript_hash": "911be5d7bd7164b3bf10963a7645bddecf8bf2f9250357c4e88e861f3e7a8883"
+    },
+    {
+      "agent_id": 4,
+      "agent_logits_rounded": [
+        34.97298,
+        8.327929,
+        5.2986,
+        -0.315423,
+        36.896744,
+        -23.882631,
+        0.210402
+      ],
+      "agent_margin": 1.9237632751464844,
+      "id": "design_critique",
+      "role_id": 0,
+      "role_logits_rounded": [
+        -0.496993,
+        -11.462795,
+        -4.68994
+      ],
+      "role_margin": 4.192947626113892,
+      "route_hash": "e6313c5cbbb7af5d6a5a9c6f56e22ce0f83bb92598f6b7488808f76be47d93b9",
+      "token_count": 28,
+      "transcript_hash": "d33d13b5ad1f5d1e7e4f2047a75be92be48f0d87c04ea3b1c792c53190ce6375"
+    }
+  ],
+  "generated_at": "2026-05-20T23:09:18.183509Z",
+  "schema_version": 1
+}

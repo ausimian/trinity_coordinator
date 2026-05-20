@@ -1,0 +1,740 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "id": "math_direct",
+      "messages": [
+        {
+          "role": "user",
+          "content": "What is 17 + 25? Answer briefly."
+        }
+      ],
+      "expected": {
+        "agent_id": 4,
+        "role_id": 2
+      },
+      "tags": [
+        "math",
+        "single_turn",
+        "verify"
+      ],
+      "notes": "Original 12-case smoke."
+    },
+    {
+      "id": "math_proof",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Prove that the sum of the first n odd positive integers is n squared. Route this to the best next role."
+        }
+      ],
+      "expected": {
+        "agent_id": 0,
+        "role_id": 0
+      },
+      "tags": [
+        "math",
+        "single_turn",
+        "worker"
+      ],
+      "notes": "Original 12-case smoke."
+    },
+    {
+      "id": "code_debug",
+      "messages": [
+        {
+          "role": "user",
+          "content": "A Python function mutates its default list argument across calls. Identify the bug and propose the smallest fix."
+        }
+      ],
+      "expected": {
+        "agent_id": 0,
+        "role_id": 0
+      },
+      "tags": [
+        "code",
+        "debug",
+        "single_turn"
+      ],
+      "notes": "Original 12-case smoke."
+    },
+    {
+      "id": "security_review",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Review this login flow for security risks: passwords are hashed, sessions are cookies, and reset tokens never expire."
+        }
+      ],
+      "expected": {
+        "agent_id": 4,
+        "role_id": 1
+      },
+      "tags": [
+        "security",
+        "thinker"
+      ],
+      "notes": "Original 12-case smoke."
+    },
+    {
+      "id": "planning",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Create a concise implementation plan for migrating a small Elixir service from in-memory state to Postgres."
+        }
+      ],
+      "expected": {
+        "agent_id": 4,
+        "role_id": 0
+      },
+      "tags": [
+        "planning",
+        "elixir"
+      ],
+      "notes": "Original 12-case smoke."
+    },
+    {
+      "id": "verification_after_worker",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Calculate 6 * 7 and verify the answer."
+        },
+        {
+          "role": "assistant",
+          "content": "Worker answer: 6 * 7 = 42."
+        }
+      ],
+      "expected": {
+        "agent_id": 4,
+        "role_id": 2
+      },
+      "tags": [
+        "math",
+        "multi_turn",
+        "verify"
+      ],
+      "notes": "Original 12-case smoke."
+    },
+    {
+      "id": "needs_revision",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Check whether the answer is correct: 19 + 24 = 41."
+        },
+        {
+          "role": "assistant",
+          "content": "Worker answer: 19 + 24 = 41."
+        }
+      ],
+      "expected": {
+        "agent_id": 4,
+        "role_id": 2
+      },
+      "tags": [
+        "math",
+        "multi_turn",
+        "verify"
+      ],
+      "notes": "Original 12-case smoke."
+    },
+    {
+      "id": "ambiguous_decomposition",
+      "messages": [
+        {
+          "role": "user",
+          "content": "This problem has unclear requirements. We may need to split it into assumptions, risks, and a concrete next action."
+        }
+      ],
+      "expected": {
+        "agent_id": 0,
+        "role_id": 2
+      },
+      "tags": [
+        "thinker",
+        "ambiguous"
+      ],
+      "notes": "Original 12-case smoke."
+    },
+    {
+      "id": "creative_but_constrained",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Draft a friendly but precise support reply explaining a billing correction. Keep it under 120 words."
+        }
+      ],
+      "expected": {
+        "agent_id": 4,
+        "role_id": 2
+      },
+      "tags": [
+        "writing",
+        "creative",
+        "constraints"
+      ],
+      "notes": "Original 12-case smoke."
+    },
+    {
+      "id": "longer_context",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are routing work inside a three-role TRINITY loop. Worker solves, Thinker plans or redirects, Verifier checks."
+        },
+        {
+          "role": "user",
+          "content": "Given a release checklist, identify the next best role. The feature compiles, unit tests pass, docs changed, but no smoke test has been run yet."
+        }
+      ],
+      "expected": {
+        "agent_id": 4,
+        "role_id": 2
+      },
+      "tags": [
+        "multi_turn",
+        "system_prompt",
+        "long"
+      ],
+      "notes": "Original 12-case smoke."
+    },
+    {
+      "id": "provider_failure_triage",
+      "messages": [
+        {
+          "role": "user",
+          "content": "The last provider call timed out after 30 seconds. Decide whether to retry, ask a thinker for a smaller plan, or verify the partial answer."
+        }
+      ],
+      "expected": {
+        "agent_id": 4,
+        "role_id": 2
+      },
+      "tags": [
+        "ops",
+        "triage"
+      ],
+      "notes": "Original 12-case smoke."
+    },
+    {
+      "id": "final_answer_check",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Solve and then verify: the capital of France is Paris."
+        },
+        {
+          "role": "assistant",
+          "content": "Worker answer: Paris is the capital of France."
+        },
+        {
+          "role": "assistant",
+          "content": "Thinker note: this is a factual lookup and likely ready."
+        }
+      ],
+      "expected": {
+        "agent_id": 4,
+        "role_id": 0
+      },
+      "tags": [
+        "multi_turn",
+        "factual",
+        "thinker_note"
+      ],
+      "notes": "Original 12-case smoke."
+    },
+    {
+      "expected": {
+        "agent_id": 0,
+        "role_id": 2
+      },
+      "id": "latex_math",
+      "messages": [
+        {
+          "content": "Render the Pythagorean theorem in LaTeX with a short proof outline.",
+          "role": "user"
+        }
+      ],
+      "tags": [
+        "math",
+        "latex"
+      ],
+      "notes": "Phase 6 expansion; route observed empirically on the canonical artifact."
+    },
+    {
+      "expected": {
+        "agent_id": 4,
+        "role_id": 0
+      },
+      "id": "sql_query",
+      "messages": [
+        {
+          "content": "Write a Postgres query that returns the top 5 sales reps by Q4 revenue, breaking ties by name.",
+          "role": "user"
+        }
+      ],
+      "tags": [
+        "code",
+        "sql"
+      ],
+      "notes": "Phase 6 expansion; route observed empirically on the canonical artifact."
+    },
+    {
+      "expected": {
+        "agent_id": 0,
+        "role_id": 1
+      },
+      "id": "haskell_types",
+      "messages": [
+        {
+          "content": "Explain why the Haskell function `const x _ = x` has type a -> b -> a.",
+          "role": "user"
+        }
+      ],
+      "tags": [
+        "code",
+        "types"
+      ],
+      "notes": "Phase 6 expansion; route observed empirically on the canonical artifact."
+    },
+    {
+      "expected": {
+        "agent_id": 0,
+        "role_id": 0
+      },
+      "id": "distributed_systems",
+      "messages": [
+        {
+          "content": "Design a leader election protocol for 5 nodes that tolerates 2 byzantine failures. Identify the key invariants.",
+          "role": "user"
+        }
+      ],
+      "tags": [
+        "systems",
+        "cap"
+      ],
+      "notes": "Phase 6 expansion; route observed empirically on the canonical artifact."
+    },
+    {
+      "expected": {
+        "agent_id": 0,
+        "role_id": 2
+      },
+      "id": "performance_question",
+      "messages": [
+        {
+          "content": "A Java service has GC pauses growing from 50ms to 300ms over 6 hours. Outline the most likely causes and the first three things to measure.",
+          "role": "user"
+        }
+      ],
+      "tags": [
+        "performance",
+        "gc"
+      ],
+      "notes": "Phase 6 expansion; route observed empirically on the canonical artifact."
+    },
+    {
+      "expected": {
+        "agent_id": 4,
+        "role_id": 2
+      },
+      "id": "customer_apology",
+      "messages": [
+        {
+          "content": "Draft a 60-word apology to a customer whose order shipped 4 days late, offering a 10% credit and free expedited shipping on the next order.",
+          "role": "user"
+        }
+      ],
+      "tags": [
+        "writing",
+        "support"
+      ],
+      "notes": "Phase 6 expansion; route observed empirically on the canonical artifact."
+    },
+    {
+      "expected": {
+        "agent_id": 0,
+        "role_id": 2
+      },
+      "id": "product_decision",
+      "messages": [
+        {
+          "content": "Should we ship a feature behind a flag with 80% test coverage, or hold for full coverage at the cost of 3 more weeks?",
+          "role": "user"
+        }
+      ],
+      "tags": [
+        "product",
+        "tradeoff"
+      ],
+      "notes": "Phase 6 expansion; route observed empirically on the canonical artifact."
+    },
+    {
+      "expected": {
+        "agent_id": 4,
+        "role_id": 0
+      },
+      "id": "empty_response",
+      "messages": [
+        {
+          "content": "The downstream API returned an empty body with 200 OK. What does our retry policy say to do, and what should it say?",
+          "role": "user"
+        }
+      ],
+      "tags": [
+        "ops",
+        "edge"
+      ],
+      "notes": "Phase 6 expansion; route observed empirically on the canonical artifact."
+    },
+    {
+      "expected": {
+        "agent_id": 4,
+        "role_id": 2
+      },
+      "id": "verify_simple",
+      "messages": [
+        {
+          "content": "Is 17 a prime number? Show why or why not in one sentence.",
+          "role": "user"
+        },
+        {
+          "content": "Worker answer: yes, 17 is prime.",
+          "role": "assistant"
+        }
+      ],
+      "tags": [
+        "verify",
+        "math"
+      ],
+      "notes": "Phase 6 expansion; route observed empirically on the canonical artifact."
+    },
+    {
+      "expected": {
+        "agent_id": 0,
+        "role_id": 0
+      },
+      "id": "thinker_breakdown",
+      "messages": [
+        {
+          "content": "Break this into Worker / Thinker / Verifier steps: 'optimize a slow database query'.",
+          "role": "user"
+        }
+      ],
+      "tags": [
+        "thinker",
+        "planning"
+      ],
+      "notes": "Phase 6 expansion; route observed empirically on the canonical artifact."
+    },
+    {
+      "expected": {
+        "agent_id": 4,
+        "role_id": 0
+      },
+      "id": "refactor_smell",
+      "messages": [
+        {
+          "content": "This 400-line function has nested 6 levels deep. What single refactor would yield the most readability gain?",
+          "role": "user"
+        }
+      ],
+      "tags": [
+        "code",
+        "refactor"
+      ],
+      "notes": "Phase 6 expansion; route observed empirically on the canonical artifact."
+    },
+    {
+      "expected": {
+        "agent_id": 0,
+        "role_id": 0
+      },
+      "id": "unicode_normalization",
+      "messages": [
+        {
+          "content": "User input has visually identical characters from different Unicode blocks. How do you canonicalize for safe comparison?",
+          "role": "user"
+        }
+      ],
+      "tags": [
+        "edge",
+        "unicode"
+      ],
+      "notes": "Phase 6 expansion; route observed empirically on the canonical artifact."
+    },
+    {
+      "expected": {
+        "agent_id": 4,
+        "role_id": 0
+      },
+      "id": "contradiction",
+      "messages": [
+        {
+          "content": "Earlier you said the answer is 12. Now you say 14. Which is correct and why?",
+          "role": "user"
+        },
+        {
+          "content": "Worker answer: my final answer is 14.",
+          "role": "assistant"
+        }
+      ],
+      "tags": [
+        "verify",
+        "logic"
+      ],
+      "notes": "Phase 6 expansion; route observed empirically on the canonical artifact."
+    },
+    {
+      "expected": {
+        "agent_id": 4,
+        "role_id": 0
+      },
+      "id": "hypothesis_design",
+      "messages": [
+        {
+          "content": "Design an A/B test with 95% power to detect a 2% conversion lift, assuming current baseline is 3.5%.",
+          "role": "user"
+        }
+      ],
+      "tags": [
+        "thinker",
+        "scientific"
+      ],
+      "notes": "Phase 6 expansion; route observed empirically on the canonical artifact."
+    },
+    {
+      "expected": {
+        "agent_id": 0,
+        "role_id": 1
+      },
+      "id": "escalate_to_human",
+      "messages": [
+        {
+          "content": "This question requires legal review. What should the routing decision be?",
+          "role": "user"
+        }
+      ],
+      "tags": [
+        "ops",
+        "escalation"
+      ],
+      "notes": "Phase 6 expansion; route observed empirically on the canonical artifact."
+    },
+    {
+      "expected": {
+        "agent_id": 0,
+        "role_id": 1
+      },
+      "id": "long_system_prompt",
+      "messages": [
+        {
+          "content": "You are a senior incident commander. Your job is to prioritize correctness over speed, escalate ambiguity, and write nothing that cannot be quoted in a postmortem.",
+          "role": "system"
+        },
+        {
+          "content": "At 02:14 UTC the primary database failed over; replica lag was 90 seconds. What is the next correct action?",
+          "role": "user"
+        }
+      ],
+      "tags": [
+        "context",
+        "system"
+      ],
+      "notes": "Phase 6 expansion; route observed empirically on the canonical artifact."
+    },
+    {
+      "expected": {
+        "agent_id": 4,
+        "role_id": 0
+      },
+      "id": "two_assistant_turns",
+      "messages": [
+        {
+          "content": "Should we deprecate the old API now?",
+          "role": "user"
+        },
+        {
+          "content": "Worker: yes, with 6 months notice.",
+          "role": "assistant"
+        },
+        {
+          "content": "Thinker: also publish a migration guide and a feature parity table.",
+          "role": "assistant"
+        }
+      ],
+      "tags": [
+        "multi",
+        "turn"
+      ],
+      "notes": "Phase 6 expansion; route observed empirically on the canonical artifact."
+    },
+    {
+      "expected": {
+        "agent_id": 1,
+        "role_id": 0
+      },
+      "id": "unicode_emoji",
+      "messages": [
+        {
+          "content": "Why does \u2764\ufe0f render as 1 character in some terminals and 2 in others?",
+          "role": "user"
+        }
+      ],
+      "tags": [
+        "edge",
+        "unicode"
+      ],
+      "notes": "Phase 6 expansion; route observed empirically on the canonical artifact."
+    },
+    {
+      "expected": {
+        "agent_id": 4,
+        "role_id": 2
+      },
+      "id": "creative_request",
+      "messages": [
+        {
+          "content": "Write 3 distinct opening lines for a noir detective story set in 1950s Honolulu.",
+          "role": "user"
+        }
+      ],
+      "tags": [
+        "creative",
+        "writing"
+      ],
+      "notes": "Phase 6 expansion; route observed empirically on the canonical artifact."
+    },
+    {
+      "expected": {
+        "agent_id": 0,
+        "role_id": 2
+      },
+      "id": "empty_user",
+      "messages": [
+        {
+          "content": ".",
+          "role": "user"
+        }
+      ],
+      "tags": [
+        "edge",
+        "empty"
+      ],
+      "notes": "Phase 6 expansion; route observed empirically on the canonical artifact."
+    },
+    {
+      "expected": {
+        "agent_id": 0,
+        "role_id": 0
+      },
+      "id": "strategic_tradeoff",
+      "messages": [
+        {
+          "content": "Should the company prioritize rebuilding the legacy monolith or shipping new features? Discuss tradeoffs.",
+          "role": "user"
+        }
+      ],
+      "tags": [
+        "thinker",
+        "strategy"
+      ],
+      "notes": "Phase 6 expansion; route observed empirically on the canonical artifact."
+    },
+    {
+      "expected": {
+        "agent_id": 0,
+        "role_id": 2
+      },
+      "id": "root_cause",
+      "messages": [
+        {
+          "content": "Three independent services failed within 10 minutes of each other. Reason through the most likely shared root cause.",
+          "role": "user"
+        }
+      ],
+      "tags": [
+        "thinker",
+        "incident"
+      ],
+      "notes": "Phase 6 expansion; route observed empirically on the canonical artifact."
+    },
+    {
+      "expected": {
+        "agent_id": 0,
+        "role_id": 0
+      },
+      "id": "architectural_decision",
+      "messages": [
+        {
+          "content": "Pick: gRPC, REST, or message queue for a new internal service that needs <100ms p99 latency and pub-sub fanout. Justify.",
+          "role": "user"
+        }
+      ],
+      "tags": [
+        "thinker",
+        "architecture"
+      ],
+      "notes": "Phase 6 expansion; route observed empirically on the canonical artifact."
+    },
+    {
+      "expected": {
+        "agent_id": 0,
+        "role_id": 0
+      },
+      "id": "risk_assessment",
+      "messages": [
+        {
+          "content": "Identify the top three risks of migrating from on-prem MySQL to managed Postgres, and propose a mitigation for each.",
+          "role": "user"
+        }
+      ],
+      "tags": [
+        "thinker",
+        "risk"
+      ],
+      "notes": "Phase 6 expansion; route observed empirically on the canonical artifact."
+    },
+    {
+      "expected": {
+        "agent_id": 4,
+        "role_id": 0
+      },
+      "id": "design_critique",
+      "messages": [
+        {
+          "content": "Critique this API design: GET /users/all-data returns every field for every user. Suggest the smallest workable redesign.",
+          "role": "user"
+        }
+      ],
+      "tags": [
+        "thinker",
+        "review"
+      ],
+      "notes": "Phase 6 expansion; route observed empirically on the canonical artifact."
+    }
+  ],
+  "coverage": {
+    "uncovered_agents": [
+      {
+        "agent_id": 2,
+        "expected_uncovered_reason": "Router does not naturally select gemini-2.5-pro slot on probed prompts."
+      },
+      {
+        "agent_id": 3,
+        "expected_uncovered_reason": "Router does not naturally select DeepSeek-R1-Distill slot on probed prompts."
+      },
+      {
+        "agent_id": 5,
+        "expected_uncovered_reason": "Router does not naturally select Qwen3-32B (reasoning) slot on probed prompts."
+      },
+      {
+        "agent_id": 6,
+        "expected_uncovered_reason": "Router does not naturally select Qwen3-32B (direct) slot on probed prompts."
+      }
+    ],
+    "agent_1_note": "Only one case (unicode_emoji) elicits agent 1. Acceptable; documented as router-natural under-selection."
+  }
+}
