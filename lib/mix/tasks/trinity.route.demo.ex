@@ -56,6 +56,7 @@ defmodule Mix.Tasks.Trinity.Route.Demo do
         strict: [
           allow_live: :boolean,
           artifact_dir: :string,
+          runtime_profile: :string,
           governed_api_key: :string,
           governed_authority_ref: :string,
           governed_base_url: :string,
@@ -83,10 +84,12 @@ defmodule Mix.Tasks.Trinity.Route.Demo do
 
     mock? = Keyword.get(opts, :mock_provider, Keyword.get(opts, :mock, false))
     governed_authority = governed_authority(opts)
+    runtime_profile = MixHelpers.runtime_profile_atom!(Keyword.get(opts, :runtime_profile))
 
     %{
       allow_live?: Keyword.get(opts, :allow_live, false),
       artifact_dir: Keyword.get(opts, :artifact_dir, Artifact.default_output_dir()),
+      runtime_profile: runtime_profile,
       governed_authority: governed_authority,
       max_turns: Keyword.get(opts, :max_turns, 5),
       message: Keyword.get(opts, :message, @default_message),
@@ -138,7 +141,14 @@ defmodule Mix.Tasks.Trinity.Route.Demo do
   end
 
   defp run_route_demo!(opts) do
-    coordinator = MixHelpers.load_coordinator!(artifact_dir: opts.artifact_dir)
+    coordinator =
+      MixHelpers.load_coordinator!(
+        Keyword.merge(
+          [artifact_dir: opts.artifact_dir],
+          if(opts.runtime_profile, do: [runtime_profile: opts.runtime_profile], else: [])
+        )
+      )
+
     {:ok, pid} = StateManager.start_link([%{role: "user", content: opts.message}])
 
     result =

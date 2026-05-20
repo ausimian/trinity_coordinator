@@ -37,6 +37,7 @@ defmodule Mix.Tasks.Trinity.Hitl.MockLoop do
       OptionParser.parse(args,
         strict: [
           artifact_dir: :string,
+          runtime_profile: :string,
           max_turns: :integer,
           message: :string,
           trace_out: :string,
@@ -54,7 +55,8 @@ defmodule Mix.Tasks.Trinity.Hitl.MockLoop do
       message: Keyword.get(opts, :message, @default_message),
       trace_path: Keyword.get(opts, :trace_out, @default_trace_path),
       trace_content: parse_trace_content(Keyword.get(opts, :trace_content, "hash")),
-      run_id: Keyword.get(opts, :run_id, "hitl_mock")
+      run_id: Keyword.get(opts, :run_id, "hitl_mock"),
+      runtime_profile: Keyword.get(opts, :runtime_profile)
     }
   end
 
@@ -72,7 +74,16 @@ defmodule Mix.Tasks.Trinity.Hitl.MockLoop do
   end
 
   defp run_mock_orchestrator!(context) do
-    coordinator = MixHelpers.load_coordinator!(artifact_dir: context.artifact_dir)
+    runtime_profile = MixHelpers.runtime_profile_atom!(Map.get(context, :runtime_profile, nil))
+
+    coordinator =
+      MixHelpers.load_coordinator!(
+        Keyword.merge(
+          [artifact_dir: context.artifact_dir],
+          if(runtime_profile, do: [runtime_profile: runtime_profile], else: [])
+        )
+      )
+
     {:ok, pid} = start_state_manager!(context.message)
     turn_counter = :counters.new(1, [])
 

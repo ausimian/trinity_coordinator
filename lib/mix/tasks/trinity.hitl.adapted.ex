@@ -34,7 +34,15 @@ defmodule Mix.Tasks.Trinity.Hitl.Adapted do
     Runtime.put_cuda_backend!()
 
     {:ok, {base_info, _base_tokenizer}} = SLMProfile.load_profile(:qwen_coordinator)
-    coordinator = MixHelpers.load_coordinator!(artifact_dir: opts.artifact_dir)
+    runtime_profile = MixHelpers.runtime_profile_atom!(Map.get(opts, :runtime_profile, nil))
+
+    coordinator =
+      MixHelpers.load_coordinator!(
+        Keyword.merge(
+          [artifact_dir: opts.artifact_dir],
+          if(runtime_profile, do: [runtime_profile: runtime_profile], else: [])
+        )
+      )
 
     HITL.kv("Artifact dir", coordinator.artifact_dir)
     HITL.kv("Artifact status", coordinator.manifest["status"])
@@ -82,6 +90,7 @@ defmodule Mix.Tasks.Trinity.Hitl.Adapted do
       OptionParser.parse(args,
         strict: [
           artifact_dir: :string,
+          runtime_profile: :string,
           compare_path: :string,
           message: :string
         ]

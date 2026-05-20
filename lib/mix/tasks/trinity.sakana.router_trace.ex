@@ -39,7 +39,15 @@ defmodule Mix.Tasks.Trinity.Sakana.RouterTrace do
     HITL.banner("TRINITY SAKANA ROUTER TRACE")
     Runtime.put_cuda_backend!()
 
-    coordinator = MixHelpers.load_coordinator!(artifact_dir: opts.artifact_dir)
+    runtime_profile = MixHelpers.runtime_profile_atom!(Map.get(opts, :runtime_profile, nil))
+
+    coordinator =
+      MixHelpers.load_coordinator!(
+        Keyword.merge(
+          [artifact_dir: opts.artifact_dir],
+          if(runtime_profile, do: [runtime_profile: runtime_profile], else: [])
+        )
+      )
 
     messages = [%{"role" => "user", "content" => opts.message}]
     manifest_path = Artifact.manifest_path(opts.artifact_dir)
@@ -107,6 +115,7 @@ defmodule Mix.Tasks.Trinity.Sakana.RouterTrace do
       OptionParser.parse(args,
         strict: [
           artifact_dir: :string,
+          runtime_profile: :string,
           python_report: :string,
           out: :string,
           message: :string,

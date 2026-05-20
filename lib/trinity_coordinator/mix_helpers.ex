@@ -12,6 +12,7 @@ defmodule TrinityCoordinator.MixHelpers do
   non-`use Mix.Task` module placed there would produce confusing diagnostics.
   """
 
+  alias TrinityCoordinator.RuntimeProfile
   alias TrinityCoordinator.Sakana.Coordinator
 
   @typedoc "Reason returned by `Coordinator.load/1` when it fails."
@@ -54,4 +55,43 @@ defmodule TrinityCoordinator.MixHelpers do
     do: message
 
   def format_load_error(reason), do: inspect(reason)
+
+  @doc """
+  Safely converts a runtime-profile CLI string into the corresponding atom
+  accepted by `TrinityCoordinator.RuntimeProfile.resolve/1`.
+
+  Only the built-in profile names are accepted; anything else raises
+  `Mix.Error`. This is the safe alternative to dynamic-atom conversion of CLI
+  strings, which would either grow the BEAM atom table or be fragile against
+  module-load order.
+
+  Returns the original value unchanged if it is already an atom in the
+  built-in list (so the helper is idempotent when callers pre-resolve).
+
+  ## Examples
+
+      iex> TrinityCoordinator.MixHelpers.runtime_profile_atom!("cuda_exla")
+      :cuda_exla
+  """
+  @spec runtime_profile_atom!(String.t() | atom() | nil) :: atom() | nil
+  def runtime_profile_atom!(nil), do: nil
+
+  def runtime_profile_atom!(value) when is_atom(value) do
+    if value in RuntimeProfile.builtin_names() do
+      value
+    else
+      Mix.raise(
+        "unknown runtime profile #{inspect(value)}; valid: " <>
+          inspect(RuntimeProfile.builtin_names())
+      )
+    end
+  end
+
+  def runtime_profile_atom!(value) when is_binary(value) do
+    Enum.find(RuntimeProfile.builtin_names(), &(Atom.to_string(&1) == value)) ||
+      Mix.raise(
+        "unknown runtime profile #{inspect(value)}; valid: " <>
+          inspect(Enum.map(RuntimeProfile.builtin_names(), &Atom.to_string/1))
+      )
+  end
 end
