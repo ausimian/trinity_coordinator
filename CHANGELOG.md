@@ -1,5 +1,102 @@
 # Changelog
 
+## 2026-05-20
+
+### Added
+- `mix trinity.env.check` — pre-flight Mix task that validates `XLA_TARGET`
+  against the bundled `xla` dependency's accepted values (and optionally that
+  `--artifact-dir` exists with a `manifest.json`). Fails fast with a single
+  readable `Mix.raise/1` line before EXLA loads.
+- `mix trinity.gates` — one-command runner for the AGENTS.md quality gate
+  matrix (format, compile WAE, test, credo --strict, dialyzer, docs WAE).
+  Optional `--include-parity-check`, `--include-hex-build` (advisory),
+  `--skip-dialyzer`, `--skip-docs`, `--fast`, `--summary-out PATH`. Writes a
+  schema_version 1 JSON summary.
+- `mix trinity.parity.check` — first-class wrapper around the Python parity
+  comparator. Validates input files exist before shelling out, captures a
+  structured JSON summary.
+- `TrinityCoordinator.MixHelpers` — shared `load_coordinator!/1` and
+  `runtime_profile_atom!/1` helpers. All Mix tasks that load the coordinator
+  now surface failures as readable `** (Mix)` messages instead of
+  `MatchError` stacktraces.
+- `TrinityCoordinator.RuntimeProfile` — declarative struct that names the
+  backend lane (`:cuda_exla`, `:host_exla`, `:binary`, `:mock_tiny`, `:emlx`,
+  plus `{:custom, backend, opts}` and struct passthrough). `Coordinator.load/1`
+  now accepts `:runtime_profile`; legacy `:backend` and `:require_cuda`
+  options continue to work and override the profile when supplied.
+- `TrinityCoordinator.Sakana.Head.assert_shape_invariants!/2` — load-time
+  guard that compares the manifest's `router_head_shape` (today `[10, 1024]`)
+  against the dimensions parsed from the loaded weights. The next checkpoint
+  refresh with a different agent count, role count, or hidden size now fails
+  loud at load time.
+- `TrinityCoordinator.RouteDecision` struct + `from_route/3` — public,
+  structured representation of one router decision with computed top-2
+  margins, selection modes, and an optional artifact identity. Backward
+  compatible with the informal route map.
+- Orchestrator cost/time budgets:
+  `:max_wall_time_ms`, `:max_provider_calls`, `:max_verifier_revisions`,
+  `:max_estimated_cost_usd`, `:max_provider_latency_ms` (recorded; not yet
+  enforced). All default to `nil` (no budget). Budget-exceeded returns
+  `{:error, {:budget_exceeded, kind, details}}` and emits a trace
+  `run_failed` event.
+- Tiny synthetic Sakana artifact fixture at `test/fixtures/sakana_tiny_artifact/`
+  (1.4 KB). Exercises the canonical manifest + router-head + routing-state
+  + shape-invariant code path on CPU without Bumblebee or Qwen. Refreshable
+  via `TrinityCoordinator.Test.SakanaTinyArtifactFactory.refresh!/0`.
+- 37-case prompt eval fixture at `examples/fixtures/qwen_router_prompt_eval_cases.json`
+  (up from 12 hardcoded cases). Decision-stable per-case snapshot at
+  `examples/fixtures/qwen_router_prompt_eval_logits.json` (`agent_id`,
+  `role_id`, `token_count`, `transcript_hash`, `route_hash`, plus diagnostic
+  raw logits and top-2 margins).
+- `--snapshot PATH`, `--snapshot-out PATH`, `--determinism-runs N`,
+  `--min-agent-margin`, `--min-role-margin` flags on the prompt eval script.
+- `--mock-provider` alias on `mix trinity.route.demo` (preserving `--mock`
+  as a compatibility alias). Live-gate failure message mentions both
+  spellings.
+- `--runtime-profile NAME` flag on `mix trinity.route.demo`,
+  `trinity.hitl.adapted`, `trinity.hitl.mock_loop`, and
+  `trinity.sakana.router_trace`. Accepts the built-in profile names; safely
+  rejects unknown names via an allowlist helper (no dynamic atom creation).
+- `docs/agent_slot_provider_mapping.md` — canonical reference for the
+  Sakana-label-vs-provider-pool boundary. Cross-linked from README.
+- Five `:default` / `:mock` / `:gemini_cli_asm` provider-pool safety
+  assertions in `test/trinity_coordinator/provider_pool_test.exs`. In
+  particular, the `:default` pool's slot 0 is asserted to NOT bind to
+  `gpt-5`, preventing accidental Sakana-label → live-model coupling.
+- `.github/workflows/ci.yml` — CPU CI (`mix trinity.gates --skip-dialyzer`).
+- `.github/workflows/cuda.yml` — manual `workflow_dispatch` for the
+  maintainer's self-hosted CUDA runner; runs the full 37-case eval +
+  full gates + advisory hex.build.
+
+### Changed
+- `priv/sakana_trinity/adapted_qwen3_0_6b_layer26/manifest.json`:
+  `python_manifest_path` and `reference_manifest_path` are now repo-relative
+  (durable fix via `TrinityCoordinator.Sakana.PythonImporter.provenance_path/2`).
+  Router head sha256 unchanged.
+- `mix.exs`: adds `elixirc_paths/1` so `test/support/` is only compiled in
+  `:test`.
+- README "Fresh Clone Setup": clarifies the sibling-repo list is advisory
+  for multi-repo development; `mix deps.get` works without them via the
+  GitHub fallback in `build_support/dependency_sources.config.exs`.
+- README "Live provider pool": clarifies that Sakana checkpoint labels are
+  training metadata, not provider bindings. Links to
+  `docs/agent_slot_provider_mapping.md`.
+- Native CUDA error message in `TrinityCoordinator.Runtime.require_cuda!/0`
+  now explains that `XLA_TARGET` is build-time, not just runtime-time, and
+  prints the exact rebuild incantation.
+
+### Internal
+- Test count: 140 → 205 (+65 net new tests across 10 new test files).
+- `mix trinity.gates` matrix verified green on CUDA host; `hex_build_advisory`
+  fails per `appendix/G_post_checklist_review_and_amendments.md` §G.2.6
+  (Bumblebee git pin); becomes blocking again once Bumblebee is unpinned.
+- 37/37 PASS on `examples/qwen_router_prompt_eval.exs` with both
+  `--snapshot` and `--determinism-runs 2` on the canonical CUDA artifact.
+
+See `~/jb/docs/20260519/sakana/` for the full analysis docset, doc 21 for
+the 10-phase execution checklist, and `tmp/phase_closure/final_milestone.md`
+for the per-phase merge log.
+
 ## 2026-04-28
 
 - Reframed the public documentation around the active Qwen/Sakana parity and

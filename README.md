@@ -489,6 +489,13 @@ The next most useful commands are:
 | `mix trinity.hitl.mock_loop` | HITL-style mock orchestrator check | Mock only |
 | `mix trinity.hitl.adapted` | Adapted Qwen shape/logit smoke | None |
 | `mix trinity.sakana.router_trace` | Python/Elixir fixed-transcript parity check | None |
+| `mix trinity.env.check` | Pre-flight validation of `XLA_TARGET` and (optionally) `--artifact-dir`. Use this first when a new contributor hits CUDA/EXLA build errors | None |
+| `mix trinity.gates` | One-command runner for the AGENTS.md quality gate matrix (format, compile WAE, test, credo --strict, dialyzer, docs WAE). Optional `--include-parity-check`, `--include-hex-build` (advisory), `--summary-out PATH` | None |
+| `mix trinity.parity.check --python-report ... --elixir-report ...` | First-class wrapper around the Python parity comparator with structured JSON summary | None |
+
+All route/demo commands now accept `--runtime-profile NAME` (`:cuda_exla`
+default; `:host_exla`, `:binary`, `:mock_tiny`, `:emlx` for non-canonical lanes).
+The default behavior is unchanged from prior releases.
 
 All route/demo commands default to the promoted artifact directory:
 
@@ -583,6 +590,9 @@ Operator-facing commands:
 | `mix trinity.hitl.base_qwen` | Base Qwen CUDA hidden-state check. |
 | `mix trinity.hitl.head_route` | Live hidden-state to Sakana-head routing check. |
 | `mix trinity.hitl.vector` | Sakana router-vector split check. |
+| `mix trinity.env.check` | Pre-flight `XLA_TARGET` + artifact-dir validator. Fails fast with a readable single-line message before EXLA loads. |
+| `mix trinity.gates` | Runs the AGENTS.md quality gate matrix in order; writes a structured summary when `--summary-out PATH` is passed. |
+| `mix trinity.parity.check` | Structured wrapper around `priv/sakana_trinity/scripts/compare_sakana_parity_reports.py`. |
 
 Artifact and parity commands:
 
