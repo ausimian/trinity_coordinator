@@ -1,12 +1,13 @@
 # Bumblebee Unpin Playbook
 
 This playbook is the 15-minute job to take when a Bumblebee Hex release
-lands that includes Qwen3 support at or after commit
-`0fd8114cf5429af9236f100f3350986e9d823c02`.
+lands that includes Qwen3 support at or after Bumblebee v0.7.0.
 
-Until then, `mix.exs` pins Bumblebee to that commit on
-`elixir-nx/bumblebee`, and `mix trinity.gates --include-hex-build` treats
-the `hex_build_advisory` step as non-blocking by design.
+As of 2026-05-21, `mix.exs` pins Bumblebee to commit
+`d0774e8ab8c4d5ac60ade95ec8dc9e1f0efd7306` on `elixir-nx/bumblebee`
+(post-v0.7.0 main; carries Qwen3 + Nx 0.12 compat needed for EMLX
+support). `mix trinity.gates --include-hex-build` treats the
+`hex_build_advisory` step as non-blocking by design.
 
 This playbook re-promotes that gate to blocking once Bumblebee is
 unpinned.

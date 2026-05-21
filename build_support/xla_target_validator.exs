@@ -16,13 +16,13 @@ defmodule XlaTargetValidator do
       `mix trinity.env.check`).
 
   The recognised target list is intentionally kept in lock-step with the
-  bundled `xla` version. As of `xla 0.9.x`, the supported set is
-  `cpu`, `cuda`, `cuda12`, `rocm`, `tpu`. The newer `xla 0.10.x` adds
-  `cuda13`; that bump is tracked separately (see
-  `docs/bumblebee_unpin_playbook.md`).
+  bundled `xla` version. As of `xla 0.10.x` (used by EXLA 0.12+), the
+  supported set is `cpu`, `cuda`, `cuda12`, `cuda13`, `rocm`, `tpu`.
+  `cuda12` remains the recommended default for CUDA hosts; `cuda13` is
+  newly accepted (the previous bundled `xla 0.9.x` rejected it).
   """
 
-  @supported_xla_targets ["cpu", "cuda", "cuda12", "rocm", "tpu"]
+  @supported_xla_targets ["cpu", "cuda", "cuda12", "cuda13", "rocm", "tpu"]
   @recommended "cuda12"
 
   @doc "Validates `XLA_TARGET`. Returns `:ok` or raises a `Mix.Error`."
@@ -77,7 +77,7 @@ defmodule XlaTargetValidator do
     accepted = Enum.map_join(@supported_xla_targets, ", ", &inspect/1)
 
     Mix.raise(
-      "XLA_TARGET=#{inspect(value)} is not accepted by the bundled xla 0.9.x. " <>
+      "XLA_TARGET=#{inspect(value)} is not accepted by the bundled xla 0.10.x. " <>
         "Accepted values: #{accepted}. " <>
         "Recommended for CUDA hosts: export XLA_TARGET=#{@recommended}. " <>
         "Recommended for CPU hosts: unset XLA_TARGET (or use cpu). " <>

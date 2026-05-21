@@ -57,21 +57,27 @@ mix run examples/qwen_router_prompt_eval.exs --runtime-profile emlx \
 
 #### EMLX-specific Caveats
 
-- **Thin SVD.** EMLX v0.3.0 routes `Nx.LinAlg.svd/2` with
-  `full_matrices?: false` through Nx's default implementation, which
-  avoids materialising the full `m × m` U on the Qwen3-0.6B embedder
-  (where `m = 151_936`, i.e. ~92 GB of U). The default path uses
-  `eigh`; for the small-σ tail to stay precise, pass
-  `--svd-compute-type f32` to `mix trinity.sakana.export_adapted` on
-  Apple.
+- **Thin SVD memory footprint.** Nx main as of commit `6424c89` (Paulo
+  Valente, [PR #1753](https://github.com/elixir-nx/nx/pull/1753))
+  refactored `Nx.LinAlg.svd/2` with `full_matrices?: false` so it does
+  not materialise the full `m × m` U on the Qwen3-0.6B embedder
+  (where `m = 151_936`, i.e. (92 GB of U under the old path).
+  This fix is in the Nx version that `trinity_coordinator` pins to.
+  Both EMLX and EXLA benefit from this change.
+- **`--svd-compute-type f32`.** Recommended on Apple. The thin-SVD
+  path uses an `eigh` decomposition under the hood; doing that work
+  in f32 keeps the small-σ tail precise.
 - **Backend label.** When the exporter validates per-tensor backend
   during the SVD reconstruction step, it accepts the
   `"EMLX.Backend"` label as well as `"EXLA.Backend<cuda:"`. No code
   changes needed for the user.
 - **Bumblebee Qwen3 support.** Bumblebee is git-pinned to a Qwen3-
-  supporting commit (`mix.exs`). EMLXAxon
-  (`https://github.com/elixir-nx/emlx`) has independently validated
-  Qwen3-0.6B loading through the EMLX backend.
+  supporting commit (post-v0.7.0 main). EMLXAxon
+  ([github.com/elixir-nx/emlx](https://github.com/elixir-nx/emlx)) has
+  independently validated Qwen3-0.6B loading through the EMLX backend.
+  Paulo Valente confirmed on 2026-05-21 that running with the bare
+  EMLX backend (no `EMLXAxon.rewrite/1`) successfully exports and
+  passes 37/37 on the prompt eval.
 - **bf16 round-trip.** The bundle is bf16 safetensors. EMLX accepts
   bf16 natively (`{:bf, 16}` ↔ MLX `bfloat16`). No quantisation or
   type cast required.

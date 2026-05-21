@@ -25,9 +25,9 @@ defmodule XlaTargetValidatorTest do
   end
 
   describe "supported_xla_targets/0" do
-    test "matches the bundled xla 0.9.x acceptance list exactly" do
+    test "matches the bundled xla 0.10.x acceptance list exactly" do
       assert XlaTargetValidator.supported_xla_targets() ==
-               ["cpu", "cuda", "cuda12", "rocm", "tpu"]
+               ["cpu", "cuda", "cuda12", "cuda13", "rocm", "tpu"]
     end
   end
 
@@ -57,18 +57,23 @@ defmodule XlaTargetValidatorTest do
   end
 
   describe "validate!/0 — rejecting cases" do
-    test "rejects cuda13 (the canonical reported failure) and names cuda12 as remediation" do
+    test "accepts cuda13 (xla 0.10.x added it; previously rejected under xla 0.9.x)" do
       System.put_env("XLA_TARGET", "cuda13")
+      assert :ok = XlaTargetValidator.validate!()
+    end
+
+    test "rejects an unrecognised CUDA suffix and names cuda12 as the recommended remediation" do
+      System.put_env("XLA_TARGET", "cuda14")
 
       try do
         XlaTargetValidator.validate!()
-        flunk("expected validate!/0 to raise on XLA_TARGET=cuda13")
+        flunk("expected validate!/0 to raise on XLA_TARGET=cuda14")
       rescue
         e in Mix.Error ->
           msg = Exception.message(e)
-          assert String.contains?(msg, "cuda13")
+          assert String.contains?(msg, "cuda14")
           assert String.contains?(msg, "cuda12")
-          assert String.contains?(msg, "not accepted by the bundled xla 0.9.x")
+          assert String.contains?(msg, "not accepted by the bundled xla 0.10.x")
           assert String.contains?(msg, "guides/troubleshooting.md")
       end
     end
@@ -136,7 +141,7 @@ defmodule XlaTargetValidatorTest do
 
   describe "validate_root_project!/1" do
     test "skips invalid XLA_TARGET when this project is loaded as a dependency" do
-      System.put_env("XLA_TARGET", "cuda13")
+      System.put_env("XLA_TARGET", "cuda14")
 
       assert :ok =
                XlaTargetValidator.validate_root_project!(
@@ -145,14 +150,14 @@ defmodule XlaTargetValidatorTest do
     end
 
     test "rejects invalid XLA_TARGET when this project is the root" do
-      System.put_env("XLA_TARGET", "cuda13")
+      System.put_env("XLA_TARGET", "cuda14")
 
       try do
         XlaTargetValidator.validate_root_project!("/tmp/root_project/trinity_coordinator")
         flunk("expected validate_root_project!/1 to raise for a root project")
       rescue
         e in Mix.Error ->
-          assert String.contains?(Exception.message(e), "cuda13")
+          assert String.contains?(Exception.message(e), "cuda14")
       end
     end
   end

@@ -1,5 +1,84 @@
 # Changelog
 
+## 0.2.0 — 2026-05-21
+
+### Highlights
+
+This release ships profile-driven backend selection (the foundation for
+Apple Silicon / EMLX support), the canonical `mix trinity.artifact.fetch`
+onboarding command, and a dep-stack bump that picks up
+[Nx PR #1753](https://github.com/elixir-nx/nx/pull/1753) (better memory
+footprint for thin SVD; the Apple-side blocker is now fixed upstream).
+
+### Added
+
+- `mix trinity.artifact.fetch` task and `TrinityCoordinator.ArtifactFetch`
+  module. Downloads the adapted-Qwen3 bundle from a HuggingFace dataset
+  repo with per-file SHA-256 verification. The pin file at
+  `priv/sakana_trinity/artifact_pin.json` is committed to the repo so a
+  fresh clone knows what to fetch before touching the network.
+- `TrinityCoordinator.RuntimeProfile.put_default_backend!/1` — single
+  bottleneck through which all backend bootstrapping flows. Profiles
+  whose backend module is not loaded raise a single informative error
+  naming the missing dep.
+- `TrinityCoordinator.RuntimeProfile.accepts_backend_label?/2` — used
+  by the exporter's per-tensor validation. Generalises the previous
+  CUDA-only check.
+- Real `:emlx` runtime profile. `nx_backend == {EMLX.Backend, device: :gpu}`.
+  Resolves to a working profile struct; users on Apple Silicon add
+  `{:emlx, "~> 0.3"}` to their parent app and pass
+  `--runtime-profile emlx` to the relevant Mix tasks / examples.
+- `--runtime-profile NAME` flag on `mix trinity.sakana.export_adapted`,
+  `mix trinity.sakana.router_trace`, and
+  `examples/qwen_router_prompt_eval.exs`. Default `cuda_exla` for
+  back-compat.
+- New guides: `guides/runtime_profiles.md`, `guides/artifact_distribution.md`.
+- Three new troubleshooting sections in `guides/troubleshooting.md`:
+  artifact-fetch failure modes, EMLX dep missing, EMLX OOM on the
+  embedder SVD (with the two upstream fixes).
+- `hf_hub ~> 0.2` dep (already on Hex).
+
+### Changed
+
+- **Dep stack bump.** `nx` pinned to GitHub
+  `elixir-nx/nx@6424c8902380380cd7a8c282b0557d653aead018` (post-v0.12.0
+  main, carries PR #1753 thin-SVD memory fix). `exla` pinned to the
+  same commit (sparse: "exla"). `bumblebee` pinned to
+  `elixir-nx/bumblebee@d0774e8ab8c4d5ac60ade95ec8dc9e1f0efd7306`
+  (post-v0.7.0 main).
+- **`xla` 0.10.x** is now the bundled version (was 0.9.x). `cuda13` is
+  newly accepted by the XLA preflight; `cuda12` remains the recommended
+  default.
+- `SLMProfile.qwen_coordinator/0` and `SLMProfile.qwen_sakana_adapted/0`
+  `load_options` no longer bake in `backend: {EXLA.Backend, client: :cuda}`.
+  They carry only `type: :bf16`; `Coordinator.load/1` injects the
+  runtime profile's backend at load time.
+- `Sakana.Exporter.ensure_cuda_backend/2` →
+  `ensure_export_backend/3`. Threads runtime profile through
+  `export_tensor/5` so per-tensor backend validation matches the profile
+  under which the export ran.
+- `Sakana.Exporter.load_profile/1` → `load_profile/2`. Uses
+  `RuntimeProfile.put_default_backend!/1` instead of CUDA-hard-coded
+  `Runtime.put_cuda_backend!/0`.
+- README `Model And Artifact Setup` rewritten to lead with
+  `mix trinity.artifact.fetch` instead of "use a blessed artifact bundle".
+
+### Fixed
+
+- Apple Silicon export OOM on the Qwen3-0.6B embedder
+  (151,936 × 1024 → (92 GB U). Upstream fix in Nx PR
+  #1753 (now in our pin). Validated end-to-end on Apple by Paulo
+  Valente (polvalente, Nx core team) on 2026-05-21: full export +
+  37/37 prompt eval pass.
+
+### Notes
+
+- `{:emlx, "~> 0.3"}` is deliberately NOT in `mix.exs`. Marking it
+  `optional: true` would still fetch and start it on Linux/CUDA hosts
+  where its Metal/MLX NIF cannot load. Apple users add the dep to
+  their parent app; the `:emlx` runtime profile resolves the backend
+  at runtime via `Code.ensure_loaded?/1`.
+
 ## 2026-05-21
 
 ### Added

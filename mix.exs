@@ -31,7 +31,7 @@ XlaTargetValidator.validate_root_project!(__DIR__)
 defmodule TrinityCoordinator.MixProject do
   use Mix.Project
 
-  @version "0.1.0"
+  @version "0.2.0"
 
   def project do
     [
@@ -79,16 +79,41 @@ defmodule TrinityCoordinator.MixProject do
     [
       # {:dep_from_hexpm, "~> 0.3.0"},
       # {:dep_from_git, git: "https://github.com/elixir-lang/my_dep.git", tag: "0.1.0"}
-      {:nx, "~> 0.9"},
+      # Nx is pinned to GitHub main to pick up
+      # https://github.com/elixir-nx/nx/pull/1753 (refactor: better memory
+      # footprint for thin svd, polvalente, 2026-05). The thin-SVD path
+      # avoids materialising the full m×m U matrix on the Qwen3-0.6B
+      # embedder (m = 151,936) regardless of backend, which is what
+      # makes the Apple/EMLX export viable without OOM. CUDA also
+      # benefits (smaller working set during the embedder factorisation).
+      # Pin moves to {:nx, "~> 0.13"} once Nx 0.13 is on Hex.
+      {:nx,
+       github: "elixir-nx/nx",
+       sparse: "nx",
+       ref: "6424c8902380380cd7a8c282b0557d653aead018",
+       override: true},
+      # EXLA pulled from the same Nx repo so the in-tree :nx version
+      # matches what EXLA expects (both at 0.12 + thin-SVD PR).
+      {:exla,
+       github: "elixir-nx/nx",
+       sparse: "exla",
+       ref: "6424c8902380380cd7a8c282b0557d653aead018",
+       override: true},
       {:axon, "~> 0.7"},
-      # Pinned to a Qwen3-supporting commit until a Bumblebee Hex release
-      # lands that includes it. To unpin, follow
-      # docs/bumblebee_unpin_playbook.md.
+      # Bumblebee main (post-v0.7.0). Qwen3 is on Hex via v0.7.0 but
+      # main has additional fixes; once Hex 0.8 lands, switch to
+      # {:bumblebee, "~> 0.8"} per docs/bumblebee_unpin_playbook.md.
       {:bumblebee,
        github: "elixir-nx/bumblebee",
-       ref: "0fd8114cf5429af9236f100f3350986e9d823c02",
+       ref: "d0774e8ab8c4d5ac60ade95ec8dc9e1f0efd7306",
        override: true},
-      {:exla, "~> 0.9"},
+      # NOTE: EMLX is deliberately NOT listed here. Marking it
+      # optional: true would still cause Mix to fetch and start EMLX on
+      # any host (incl. Linux/CUDA), whose Metal/MLX NIF cannot load.
+      # Apple Silicon users add {:emlx, "~> 0.3"} to their own
+      # application's deps; the :emlx runtime profile then resolves to
+      # the EMLX.Backend at runtime via Code.ensure_loaded?/1. See
+      # guides/runtime_profiles.md.
       DependencySources.dep(:inference, __DIR__),
       DependencySources.dep(:agent_session_manager, __DIR__),
       DependencySources.dep(:gemini_cli_sdk, __DIR__),

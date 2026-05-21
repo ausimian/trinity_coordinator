@@ -269,11 +269,13 @@ workspaces, but they are not required for fresh-clone onboarding.
 
 Resolved core dependency lane:
 
-- `nx 0.10.0`
-- `exla 0.10.0`
+- `nx 0.12.0` (pinned to GitHub main commit
+  `6424c8902380380cd7a8c282b0557d653aead018` for
+  [PR #1753 thin SVD memory fix](https://github.com/elixir-nx/nx/pull/1753))
+- `exla 0.12.0` (pinned to the same commit)
 - `axon 0.7.0`
-- `bumblebee` pinned to `elixir-nx/bumblebee`
-  `0fd8114cf5429af9236f100f3350986e9d823c02`
+- `bumblebee` pinned to `elixir-nx/bumblebee` commit
+  `d0774e8ab8c4d5ac60ade95ec8dc9e1f0efd7306` (post-v0.7.0 main)
 
 ## Quick Verification
 

@@ -86,25 +86,28 @@ model = TrinityCoordinator.CoordinationHead.build_model(hidden_size, num_agents,
 
 The checked-in dependency lane is:
 
-- `bumblebee` pinned to upstream `elixir-nx/bumblebee`
-  `0fd8114cf5429af9236f100f3350986e9d823c02`
+- `nx` pinned to GitHub `elixir-nx/nx`
+  `6424c8902380380cd7a8c282b0557d653aead018` (post-v0.12.0 main,
+  carries [PR #1753](https://github.com/elixir-nx/nx/pull/1753) thin-SVD
+  memory-footprint fix). When Nx 0.13 lands on Hex, the pin moves to
+  `{:nx, "~> 0.13"}`.
+- `exla` pinned to the same Nx repo at the same commit (sparse: "exla").
 - `axon ~> 0.7`
-- `nx ~> 0.9`
-- `exla ~> 0.9`
+- `bumblebee` pinned to upstream `elixir-nx/bumblebee`
+  `d0774e8ab8c4d5ac60ade95ec8dc9e1f0efd7306` (post-v0.7.0 main).
 
-On this host, that lane is verified with `XLA_TARGET=cuda12`. Hex
-`bumblebee 0.6.3` does not ship Qwen3, so this repo pins the upstream Bumblebee
-commit that includes `Bumblebee.Text.Qwen3` and its Hugging Face parameter
-mapping.
+On this host, that lane is verified with `XLA_TARGET=cuda12`. Bumblebee
+v0.7.0 ships Qwen3 via Hex; the post-main pin picks up minor fixes
+landed after the release.
 
 ### `qwen_cuda_ready` outcome
 
 Current resolved versions used for this outcome:
 
-- `bumblebee` git ref `0fd8114cf5429af9236f100f3350986e9d823c02`
+- `nx 0.12.0` (GitHub commit above)
+- `exla 0.12.0` (GitHub commit above)
 - `axon 0.7.0`
-- `nx 0.10.0`
-- `exla 0.10.0`
+- `bumblebee` git ref `d0774e8ab8c4d5ac60ade95ec8dc9e1f0efd7306`
 
 Outcome: `qwen_cuda_ready` is active for base Qwen hidden-state extraction.
 `SLMProfile.qwen_coordinator/0` uses:
@@ -112,7 +115,9 @@ Outcome: `qwen_cuda_ready` is active for base Qwen hidden-state extraction.
 - repo: `{:hf, "Qwen/Qwen3-0.6B"}`
 - module: `Bumblebee.Text.Qwen3`
 - architecture: `:for_causal_language_modeling`
-- load options: `backend: {EXLA.Backend, client: :cuda}`, `type: :bf16`
+- load options: `type: :bf16` (the backend is injected at load time
+  by `Coordinator.load/1` based on the active `RuntimeProfile`;
+  see `guides/runtime_profiles.md`).
 - expected hidden size: `1024`
 
 Hidden states are enabled at prediction time with Axon's global layer option

@@ -166,29 +166,37 @@ If CUDA is missing, verify:
 - EXLA dependency target;
 - environment isolation, especially shells launched without CUDA env vars.
 
-## XLA_TARGET=cuda13 Is Rejected At Compile Time
+## XLA_TARGET Rejected At Compile Time
 
-`xla 0.9.1` does not accept `cuda13`. If `mix deps.compile xla` reports
-an unsupported target, set:
+`xla 0.10.x` (which EXLA 0.12+ uses) accepts:
+
+```text
+cpu, cuda, cuda12, cuda13, rocm, tpu
+```
+
+Anything else is rejected at compile time. The most common error mode
+is a stale shell export like `XLA_TARGET=cuda14`. Set:
 
 ```bash
 export XLA_TARGET=cuda12
 ```
 
-This applies even on hosts whose installed CUDA toolkit is 13.x. The
-`XLA_TARGET` controls which prebuilt XLA artifact is fetched; mismatched
-host CUDA installations are tolerated by EXLA via dynamic loading.
+`cuda12` is the canonical recommended default for CUDA hosts even when
+the host installed toolkit is 13.x — the `XLA_TARGET` controls which
+prebuilt XLA artifact is fetched; mismatched host CUDA installations
+are tolerated by EXLA via dynamic loading. Use `cuda13` when you
+specifically want the cuda13 prebuilt.
 
 ### Automatic preflight
 
-As of 2026-05-21, the project surfaces this automatically via a Mix
+The project surfaces unsupported targets automatically via a Mix
 preflight that runs from `mix.exs` before any compilation step. An
-operator whose shell exports `XLA_TARGET=cuda13` will see a single
-readable line instead of an EXLA stacktrace:
+operator whose shell exports an unsupported `XLA_TARGET` will see a
+single readable line instead of an EXLA stacktrace:
 
 ```text
-** (Mix.Error) XLA_TARGET="cuda13" is not accepted by the bundled xla 0.9.x.
-Accepted values: "cpu", "cuda", "cuda12", "rocm", "tpu".
+** (Mix.Error) XLA_TARGET="cuda14" is not accepted by the bundled xla 0.10.x.
+Accepted values: "cpu", "cuda", "cuda12", "cuda13", "rocm", "tpu".
 Recommended for CUDA hosts: export XLA_TARGET=cuda12.
 Recommended for CPU hosts: unset XLA_TARGET (or use cpu).
 The bundled xla rejects unrecognised targets at compile time, so EXLA
@@ -295,9 +303,22 @@ precise.
 
 ### EMLX OOM on the embedder SVD
 
-If your EMLX version is older than v0.3.0, the native SVD path
-materialises the full `m × m` U matrix on the Qwen3-0.6B embedder
-(`m = 151_936`, ~92 GB). Upgrade to `{:emlx, "~> 0.3"}` — Paulo
-Valente's commit `3482b79` ("fix: use nx-defined implementation for
-non-full svd computation") routes `full_matrices?: false` through
-Nx's default path and keeps the work at `min(m, n)² = 1024²`.
+The Qwen3-0.6B embedder is `151_936 × 1024`. Before two fixes
+landed, the SVD of this matrix tried to materialise a full `m × m`
+U matrix — about 92 GB. The fix landed in two places:
+
+1. **EMLX v0.3.0** routed `Nx.LinAlg.svd/2` with `full_matrices?: false`
+   through Nx's default implementation instead of MLX's native SVD
+   (which always allocates the full U). Commit `3482b79`, Paulo
+   Valente, "fix: use nx-defined implementation for non-full svd
+   computation".
+2. **Nx main commit `6424c89`**
+   ([PR #1753](https://github.com/elixir-nx/nx/pull/1753)) refactored
+   the default thin-SVD path itself to keep the working set bounded
+   by `min(m, n)²`. Both EMLX and EXLA benefit from this fix.
+
+`trinity_coordinator` pins the post-#1753 Nx (see `mix.exs`), so a
+user who runs `mix trinity.sakana.export_adapted --runtime-profile emlx`
+on Apple Silicon with `{:emlx, "~> 0.3"}` in their parent app gets
+the bounded-memory path automatically. If you see an OOM, confirm
+your Nx version: it should be 0.12.x or later.
