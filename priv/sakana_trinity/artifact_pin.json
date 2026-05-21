@@ -1,0 +1,52 @@
+{
+  "version": 1,
+  "revision": "v1.0.0",
+  "files": [
+    {
+      "path": "manifest.json",
+      "sha256": "2a1476a4d2c7b66633232a564114dfb7ebe46f6bea624fc9ae9123678cafcbb9"
+    },
+    {
+      "path": "router_head.safetensors",
+      "sha256": "7ff2db0e6659cac4dd68c5fff47a112768042b31321127aeb1412a6d8e6c09be"
+    },
+    {
+      "path": "checkpoints/0001_embedder.token_embedding.kernel.safetensors",
+      "sha256": "09332ee11836e23b583a5336cbaf22b4d292527cbdb1adce245fa908f60a166c"
+    },
+    {
+      "path": "checkpoints/0002_decoder.blocks.26.self_attention.query.kernel.safetensors",
+      "sha256": "2a7c181903bae8013a083dfc46df563b795a283dd26a48fcc04bae50876b8eb7"
+    },
+    {
+      "path": "checkpoints/0003_decoder.blocks.26.self_attention.key.kernel.safetensors",
+      "sha256": "25b731084ffa3ef12bc94fcb7c9805c689d361fd051185ab9dbe35049c0437c8"
+    },
+    {
+      "path": "checkpoints/0004_decoder.blocks.26.self_attention.value.kernel.safetensors",
+      "sha256": "c8238f211f6a733472ce2bd56729c358898427b05135436b3a04bc21c030166c"
+    },
+    {
+      "path": "checkpoints/0005_decoder.blocks.26.self_attention.output.kernel.safetensors",
+      "sha256": "0736a3b878757ba594d19b5e283a5d35a6516249aa544e17456ae4fc1615074b"
+    },
+    {
+      "path": "checkpoints/0006_decoder.blocks.26.ffn.gate.kernel.safetensors",
+      "sha256": "9ab06340d145dcf28aa6eb8f0c07d48562749e573f61da68f0e49b4c4ee897a2"
+    },
+    {
+      "path": "checkpoints/0007_decoder.blocks.26.ffn.intermediate.kernel.safetensors",
+      "sha256": "88ee9f710c5eb4d0596be3da140c8ecbd6c40616727c3a6e43a2e71b0b9e07df"
+    },
+    {
+      "path": "checkpoints/0008_decoder.blocks.26.ffn.output.kernel.safetensors",
+      "sha256": "07e112aa3778d010ede26f3eb2da5605035c3be79efb3e8e5d0facaf0f07853e"
+    },
+    {
+      "path": "checkpoints/0009_language_modeling_head.output.kernel.safetensors",
+      "sha256": "6608a2669a921201c5fe81b2ddb938764663d63f5ec612a855ab7d5f6dc6966c"
+    }
+  ],
+  "repo_id": "nshkrdotcom/trinity-coordinator-adapted-qwen3-0.6b",
+  "manifest_sha256": "2a1476a4d2c7b66633232a564114dfb7ebe46f6bea624fc9ae9123678cafcbb9"
+}
