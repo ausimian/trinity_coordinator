@@ -36,6 +36,31 @@ defmodule XlaTargetValidator do
     end
   end
 
+  @doc """
+  Validates unless `repo_root` is itself inside a Mix-managed `deps/` tree.
+
+  This lets `trinity_coordinator` enforce its own bundled-XLA target list when
+  it is the root project, while avoiding surprising parent projects that consume
+  it as a transitive dependency and may manage XLA differently.
+  """
+  @spec validate_root_project!(Path.t()) :: :ok
+  def validate_root_project!(repo_root) when is_binary(repo_root) do
+    if repo_under_mix_deps?(repo_root) do
+      :ok
+    else
+      validate!()
+    end
+  end
+
+  @doc "Returns true when `repo_root` has a path component named `deps`."
+  @spec repo_under_mix_deps?(Path.t()) :: boolean()
+  def repo_under_mix_deps?(repo_root) when is_binary(repo_root) do
+    repo_root
+    |> Path.expand()
+    |> Path.split()
+    |> Enum.member?("deps")
+  end
+
   @doc "Returns the list of XLA_TARGET values accepted by the bundled xla."
   @spec supported_xla_targets() :: [String.t()]
   def supported_xla_targets, do: @supported_xla_targets

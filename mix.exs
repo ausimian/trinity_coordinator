@@ -26,9 +26,7 @@ end
 # When this mix.exs is being evaluated as a transitive dependency
 # (our directory sits inside some parent project's deps/), defer
 # entirely to that parent project's build configuration.
-unless __DIR__ |> Path.split() |> Enum.member?("deps") do
-  XlaTargetValidator.validate!()
-end
+XlaTargetValidator.validate_root_project!(__DIR__)
 
 defmodule TrinityCoordinator.MixProject do
   use Mix.Project

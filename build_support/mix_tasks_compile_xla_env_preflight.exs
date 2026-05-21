@@ -50,9 +50,11 @@ defmodule Mix.Tasks.Compile.XlaEnvPreflight do
 
   use Mix.Task.Compiler
 
+  @repo_root Path.expand("..", __DIR__)
+
   @impl Mix.Task.Compiler
   def run(_argv) do
-    XlaTargetValidator.validate!()
+    XlaTargetValidator.validate_root_project!(@repo_root)
     {:noop, []}
   end
 end

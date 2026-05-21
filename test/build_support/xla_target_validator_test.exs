@@ -3,16 +3,10 @@ defmodule XlaTargetValidatorTest do
   Tests for the XLA_TARGET preflight validator.
 
   These tests manipulate `XLA_TARGET` via `System.put_env/2` and
-  `System.delete_env/1`. Per AGENTS.md, tests may manipulate
-  environment variables for config-boundary checks, which is exactly
-  what this is. The suite is `async: false` because `System.put_env/2`
-  is process-global and would otherwise race with other tests that
-  read XLA_TARGET.
-
-  The validator module itself lives at
-  `build_support/xla_target_validator.exs` and is loaded eagerly by
-  `mix.exs`; by the time the test suite runs, it is already loaded
-  into the Code server.
+  `System.delete_env/1`. Per AGENTS.md, tests may manipulate environment
+  variables for config-boundary checks, which is exactly what this is. The suite
+  is `async: false` because `System.put_env/2` is process-global and would
+  otherwise race with other tests that read XLA_TARGET.
   """
 
   use ExUnit.Case, async: false
@@ -125,6 +119,41 @@ defmodule XlaTargetValidatorTest do
     test "returns nil when XLA_TARGET is unset" do
       System.delete_env("XLA_TARGET")
       assert XlaTargetValidator.raw_xla_target() == nil
+    end
+  end
+
+  describe "repo_under_mix_deps?/1" do
+    test "detects a project loaded from a parent deps directory" do
+      assert XlaTargetValidator.repo_under_mix_deps?("/tmp/fresh/deps/trinity_coordinator")
+      assert XlaTargetValidator.repo_under_mix_deps?("/tmp/fresh/deps/foo/deps/bar")
+    end
+
+    test "does not classify ordinary workspace paths as deps-managed" do
+      refute XlaTargetValidator.repo_under_mix_deps?("/home/home/p/g/n/trinity_coordinator")
+      refute XlaTargetValidator.repo_under_mix_deps?("/tmp/workspace/trinity_coordinator")
+    end
+  end
+
+  describe "validate_root_project!/1" do
+    test "skips invalid XLA_TARGET when this project is loaded as a dependency" do
+      System.put_env("XLA_TARGET", "cuda13")
+
+      assert :ok =
+               XlaTargetValidator.validate_root_project!(
+                 "/tmp/parent_project/deps/trinity_coordinator"
+               )
+    end
+
+    test "rejects invalid XLA_TARGET when this project is the root" do
+      System.put_env("XLA_TARGET", "cuda13")
+
+      try do
+        XlaTargetValidator.validate_root_project!("/tmp/root_project/trinity_coordinator")
+        flunk("expected validate_root_project!/1 to raise for a root project")
+      rescue
+        e in Mix.Error ->
+          assert String.contains?(Exception.message(e), "cuda13")
+      end
     end
   end
 end
