@@ -273,8 +273,8 @@ hosts. To use the profile, add the dep to your parent application:
 # mix.exs
 def deps do
   [
-    {:trinity_coordinator, "~> 0.2"},
-    {:emlx, "~> 0.3"}      # <-- add this
+    {:trinity_coordinator, "~> 0.1"},   # (it hasn not been published to hex, use github or path dep)
+    {:emlx, "~> 0.3"}                   # <-- add this
   ]
 end
 ```
