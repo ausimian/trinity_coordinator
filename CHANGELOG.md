@@ -1,5 +1,80 @@
 # Changelog
 
+## 2026-05-20 (Phase 11 follow-up)
+
+### Added
+- Enforceable `:max_provider_latency_ms` budget. A single dispatch that
+  exceeds the limit aborts the loop with
+  `{:error, {:budget_exceeded, :provider_latency_ms, %{limit_ms,
+  observed_ms, checkpoint, turn}}}` at the `:after_dispatch` checkpoint.
+- Enforceable `:max_verifier_revisions` budget. Each Verifier dispatch
+  whose status is not `:accepted` increments the counter; the (N+1)th
+  rejection aborts at `:after_verifier_revision`.
+- Optional `:cost_estimator_fn` orchestrator option. When supplied
+  alongside `:max_estimated_cost_usd`, the loop totals the per-dispatch
+  cost and aborts at `:after_dispatch` once the cumulative cost exceeds
+  the limit. Without the function, setting `:max_estimated_cost_usd`
+  emits a one-shot `Logger.warning/1` per `run_loop/4` call.
+- `TrinityCoordinator.RouteDecision.to_trace_map/1` — JSON-safe map
+  projection of the struct, used to attach a `:route_decision` field to
+  every `:turn_completed` trace event.
+- `docs/production_runbook.md` — 10-section operator runbook covering
+  pre-deploy checks, artifact installation, provider pools, budget
+  contract, trace persistence, failure-mode triage, secrets handling,
+  in-place artifact updates, observability, and rollback.
+- `docs/bumblebee_unpin_playbook.md` — 5-section, 15-minute runbook for
+  unpinning `:bumblebee` when a Qwen3-supporting Hex release lands; flips
+  the `mix trinity.gates` `hex_build` step from advisory back to
+  blocking.
+- Default margin floors on `examples/qwen_router_prompt_eval.exs`:
+  `--min-agent-margin 0.24`, `--min-role-margin 1.06`. Calibrated to 80%
+  of empirical worst-case margins (`agent_margin 0.301` on
+  `unicode_emoji`; `role_margin 1.335` on `root_cause`) observed on
+  2026-05-20 in the bundled logits fixture. Pass `0.0` to disable.
+
+### Changed
+- `:max_provider_calls` semantics tightened to exact: a value of N
+  allows exactly N dispatches; the (N+1)th attempt aborts at
+  `:before_dispatch` with `observed = N+1`. Same `> limit` change
+  applied to `:max_verifier_revisions`.
+- `Orchestrator` moduledoc: full budget contract is now in-band; cross
+  references `docs/production_runbook.md` for service-grade defaults.
+- `mix.exs`: added an inline comment cross-referencing
+  `docs/bumblebee_unpin_playbook.md` next to the Bumblebee git pin.
+- `README.md`: "Project Files" now links to the production runbook,
+  Bumblebee unpin playbook, and agent-slot/provider mapping. The
+  "Running The Router" budgets paragraph points operators at the
+  runbook for the full contract.
+- `guides/operations_qc.md`: expected test count updated to
+  `1 doctest, 214 tests, 0 failures (24 excluded)`; added pointers to
+  `mix trinity.gates`, `mix trinity.env.check`, `mix trinity.parity.check`,
+  and the production runbook §4.
+- `guides/onboarding.md`: test count refreshed; added the
+  `mix trinity.env.check` pre-flight step.
+- `guides/provider_service_hardening.md`: §5 cross-links the production
+  runbook §4 for service-operation budgets.
+- `guides/troubleshooting.md`: new section "XLA_TARGET=cuda13 is
+  rejected at compile time".
+- `~/jb/docs/20260519/sakana/appendix/H_post_execution_verification_and_handoff.md`:
+  §H.3.1 marked resolved (`HEAD == origin/main`); new §H.7 points at the
+  Phase 11 follow-up docset at `~/jb/docs/20260520/sakana/`.
+
+### Internal
+- Test count: 205 → 214 (+9 net new tests across budget, RouteDecision,
+  and trace-shape coverage).
+- All AGENTS.md gates green: format, compile WAE, test, credo --strict,
+  dialyzer 0 errors, docs WAE.
+- `mix trinity.gates --include-hex-build` exits 0 with the documented
+  `hex_build_advisory: fail` (per Appendix G §G.2.6); blocking resumes
+  after the unpin playbook lands.
+- 37/37 PASS on `examples/qwen_router_prompt_eval.exs` with default
+  margin floors AND `--snapshot` AND `--determinism-runs 2`.
+
+See `~/jb/docs/20260520/sakana/06_execution_log.md` for the per-item
+phase-11 closure record. See
+`~/jb/docs/20260520/sakana/01_phase_11_budget_honesty_and_route_decision.md`
+for the original Phase 11 checklist.
+
 ## 2026-05-20
 
 ### Added

@@ -21,6 +21,14 @@ defmodule Examples.QwenRouterPromptEval do
 
   @cases_fixture_path Path.join(["examples", "fixtures", "qwen_router_prompt_eval_cases.json"])
 
+  # Phase 11 Option D (margin-floor ratchet):
+  # 80% of the empirical worst observed in qwen_router_prompt_eval_logits.json
+  # on 2026-05-20 (agent worst = 0.301 on `unicode_emoji`, role worst = 1.335
+  # on `root_cause`). Pass `--min-agent-margin 0.0` / `--min-role-margin 0.0`
+  # to disable for one-off debug. See ~/jb/docs/20260520/sakana/04_margin_floor_ratchet.md.
+  @default_min_agent_margin 0.24
+  @default_min_role_margin 1.06
+
   defp load_cases! do
     body = File.read!(@cases_fixture_path)
     doc = Jason.decode!(body)
@@ -165,8 +173,8 @@ defmodule Examples.QwenRouterPromptEval do
     show_logits? = Keyword.get(opts, :show_logits, false)
     verbose? = Keyword.get(opts, :verbose, false) or show_logits?
     determinism_runs = max(1, Keyword.get(opts, :determinism_runs, 1))
-    min_agent_margin = Keyword.get(opts, :min_agent_margin)
-    min_role_margin = Keyword.get(opts, :min_role_margin)
+    min_agent_margin = Keyword.get(opts, :min_agent_margin, @default_min_agent_margin)
+    min_role_margin = Keyword.get(opts, :min_role_margin, @default_min_role_margin)
     snapshot_in = Keyword.get(opts, :snapshot)
     snapshot_out = Keyword.get(opts, :snapshot_out)
     snapshot_expected = if snapshot_in, do: Jason.decode!(File.read!(snapshot_in)), else: nil

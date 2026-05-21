@@ -165,3 +165,23 @@ If CUDA is missing, verify:
 - `XLA_TARGET=cuda12`;
 - EXLA dependency target;
 - environment isolation, especially shells launched without CUDA env vars.
+
+## XLA_TARGET=cuda13 Is Rejected At Compile Time
+
+`xla 0.9.1` does not accept `cuda13`. If `mix deps.compile xla` reports
+an unsupported target, set:
+
+```bash
+export XLA_TARGET=cuda12
+```
+
+This applies even on hosts whose installed CUDA toolkit is 13.x. The
+`XLA_TARGET` controls which prebuilt XLA artifact is fetched; mismatched
+host CUDA installations are tolerated by EXLA via dynamic loading.
+
+The pre-flight task surfaces this fast:
+
+```bash
+mix trinity.env.check
+```
+

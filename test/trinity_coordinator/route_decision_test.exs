@@ -55,4 +55,43 @@ defmodule TrinityCoordinator.RouteDecisionTest do
       assert rd.margins == %{agent: nil, role: nil}
     end
   end
+
+  describe "to_trace_map/1" do
+    test "produces a JSON-safe map with no Nx tensors" do
+      route = %{
+        agent_id: 4,
+        role_id: 2,
+        agent_logits: Nx.tensor([1.0, 0.5, -2.0, 3.5, 9.0, -1.0, 0.0], type: :f32),
+        role_logits: Nx.tensor([0.2, 0.1, 5.5], type: :f32),
+        logits: Nx.tensor([[1.0, 0.5, -2.0, 3.5, 9.0, -1.0, 0.0, 0.2, 0.1, 5.5]], type: :f32)
+      }
+
+      rd =
+        RouteDecision.from_route(route, [%{role: "user", content: "x"}],
+          artifact_identity: %{a: 1}
+        )
+
+      m = RouteDecision.to_trace_map(rd)
+
+      assert m.agent_id == 4
+      assert m.role_id == 2
+      assert m.role_name == "Verifier"
+      assert m.margins.agent > 0.0
+      assert m.margins.role > 0.0
+      assert m.selection_modes == %{agent: :argmax, role: :argmax}
+      assert is_binary(m.transcript_hash)
+      assert m.artifact_identity == %{a: 1}
+
+      # JSON-encodable: no Nx tensors anywhere.
+      refute Enum.any?(Map.values(m), fn v -> match?(%Nx.Tensor{}, v) end)
+      assert {:ok, _} = Jason.encode(m)
+    end
+
+    test "safe when artifact_identity is nil" do
+      rd = RouteDecision.from_route(%{agent_id: 0, role_id: 0}, nil)
+      m = RouteDecision.to_trace_map(rd)
+      assert m.artifact_identity == nil
+      assert {:ok, _} = Jason.encode(m)
+    end
+  end
 end

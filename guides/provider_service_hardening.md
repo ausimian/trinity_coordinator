@@ -75,6 +75,9 @@ Use red-green-refactor and commit/push only after the listed quality gates pass.
    - Require a positive budget variable for release smoke tests.
    - Limit max tokens and max turns in smoke tests.
    - Skip live smokes when credentials or budget are absent.
+   - For service operation budgets (wall time, provider calls, latency,
+     verifier revisions, cost), see
+     [Production Deployment Runbook §4](../docs/production_runbook.md).
 
 6. Examples and operator UX
    - Keep `examples/local_coordinator_route.exs` as the no-provider diagnostic.

@@ -116,4 +116,22 @@ defmodule TrinityCoordinator.RouteDecision do
       [] -> nil
     end
   end
+
+  @doc """
+  Returns a JSON-encodable map representation of this struct, omitting Nx
+  tensors. Use this when persisting to trace logs or shipping across
+  process boundaries.
+  """
+  @spec to_trace_map(t()) :: map()
+  def to_trace_map(%__MODULE__{} = rd) do
+    %{
+      agent_id: rd.agent_id,
+      role_id: rd.role_id,
+      role_name: rd.role_name,
+      margins: rd.margins,
+      selection_modes: rd.selection_modes,
+      transcript_hash: rd.transcript_hash,
+      artifact_identity: rd.artifact_identity
+    }
+  end
 end

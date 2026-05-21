@@ -54,6 +54,9 @@ defmodule TrinityCoordinator.MixProject do
       # {:dep_from_git, git: "https://github.com/elixir-lang/my_dep.git", tag: "0.1.0"}
       {:nx, "~> 0.9"},
       {:axon, "~> 0.7"},
+      # Pinned to a Qwen3-supporting commit until a Bumblebee Hex release
+      # lands that includes it. To unpin, follow
+      # docs/bumblebee_unpin_playbook.md.
       {:bumblebee,
        github: "elixir-nx/bumblebee",
        ref: "0fd8114cf5429af9236f100f3350986e9d823c02",
@@ -120,6 +123,8 @@ defmodule TrinityCoordinator.MixProject do
         "docs/trace_persistence.md",
         "docs/configurable_provider_pools.md",
         "docs/agent_slot_provider_mapping.md",
+        "docs/production_runbook.md",
+        "docs/bumblebee_unpin_playbook.md",
         "docs/provider_smoke_tests.md",
         "CHANGELOG.md",
         "LICENSE"
@@ -143,6 +148,11 @@ defmodule TrinityCoordinator.MixProject do
           "guides/provider_service_hardening.md",
           "guides/operations_qc.md",
           "guides/troubleshooting.md"
+        ],
+        "Operator Runbooks": [
+          "docs/agent_slot_provider_mapping.md",
+          "docs/production_runbook.md",
+          "docs/bumblebee_unpin_playbook.md"
         ],
         "Reference Notes": [
           "docs/sakana_svd_byte_match_rigor_plan.md",

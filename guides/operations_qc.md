@@ -9,14 +9,40 @@ runtime lanes.
 XLA_TARGET=cuda12 mix test
 ```
 
-Current expected result:
+Current expected result (post Phase 11, 2026-05-20):
 
 ```text
-1 doctest, 170 tests, 0 failures, 25 excluded
+1 doctest, 214 tests, 0 failures (24 excluded)
 ```
 
 The excluded tests include slow Qwen/SVD gates and expensive artifact export
 paths.
+
+For the AGENTS.md gate matrix in one command:
+
+```bash
+XLA_TARGET=cuda12 mix trinity.gates --include-hex-build --summary-out tmp/gates.json
+```
+
+`hex_build_advisory: fail` is expected and non-blocking until Bumblebee
+is unpinned; see `docs/bumblebee_unpin_playbook.md`.
+
+For a pre-flight environment check before any other Mix task:
+
+```bash
+XLA_TARGET=cuda12 mix trinity.env.check
+```
+
+For a structured wrapper around the Python parity comparator:
+
+```bash
+XLA_TARGET=cuda12 mix trinity.parity.check \
+  --python-report tmp/sakana_parity/python_sample_trace.json \
+  --elixir-report tmp/sakana_parity/elixir_sample_trace.json
+```
+
+For service-grade budget and trace configuration, see
+[Production Deployment Runbook](../docs/production_runbook.md).
 
 ## Static Checks
 

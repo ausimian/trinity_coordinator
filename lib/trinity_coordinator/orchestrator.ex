@@ -7,6 +7,8 @@ defmodule TrinityCoordinator.Orchestrator do
   bring-up and tests where live LLM calls are intentionally out of scope.
   """
 
+  require Logger
+
   alias TrinityCoordinator.{
     AgentPool,
     CoordinationHead,
@@ -43,6 +45,28 @@ defmodule TrinityCoordinator.Orchestrator do
   - `:num_roles` – number of role logits in the coordination head.
   - `:route_opts` – optional `CoordinationHead.route/6` selection options.
   - `:trace` – trace options (enabled, sink, run_id, content).
+
+  Cost / time budgets (all default `nil` = unbounded). When a budget is
+  exceeded the loop returns `{:error, {:budget_exceeded, kind, details}}`
+  and emits a `:run_failed` trace event with the same kind and details.
+
+  - `:max_wall_time_ms` – wall-clock cap, checked at `:turn_start`.
+  - `:max_provider_calls` – at most N total dispatches; the (N+1)th
+    attempt aborts at `:before_dispatch`.
+  - `:max_provider_latency_ms` – aborts immediately after a single
+    dispatch whose `:provider_latency_ms` exceeds the limit
+    (`checkpoint: :after_dispatch`).
+  - `:max_verifier_revisions` – counts Verifier dispatches that did
+    NOT accept. The (N+1)th rejection aborts at
+    `:after_verifier_revision`.
+  - `:max_estimated_cost_usd` – aborts when cumulative cost exceeds
+    the limit. Requires a `:cost_estimator_fn` to fire; without one,
+    a single `Logger.warning/1` is emitted per run_loop call.
+  - `:cost_estimator_fn` – `(dispatch_map) :: float()` returning the
+    USD cost for the just-completed dispatch. Called only when
+    `:max_estimated_cost_usd` is set. `dispatch_map` carries
+    `:provider`, `:provider_model`, `:response_text`, `:mode`,
+    `:provider_latency_ms`.
   """
   def run_loop(pid, model, params, opts \\ [])
 
@@ -88,7 +112,8 @@ defmodule TrinityCoordinator.Orchestrator do
       started_monotonic_ms: System.monotonic_time(:millisecond),
       provider_calls_ref: :counters.new(1, [:atomics]),
       verifier_revisions_ref: :counters.new(1, [:atomics]),
-      estimated_cost_micro_usd_ref: :counters.new(1, [:atomics])
+      estimated_cost_micro_usd_ref: :counters.new(1, [:atomics]),
+      cost_warning_emitted_ref: :counters.new(1, [:atomics])
     }
 
     run_ctx = %{
@@ -103,7 +128,8 @@ defmodule TrinityCoordinator.Orchestrator do
       route_opts: Keyword.get(opts, :route_opts, []),
       respect_thinker_suggestions: Keyword.get(opts, :respect_thinker_suggestions, true),
       budgets: budgets,
-      counters: counters
+      counters: counters,
+      cost_estimator_fn: Keyword.get(opts, :cost_estimator_fn)
     }
 
     runtime_metadata = build_runtime_metadata(opts[:slm_context])
@@ -261,7 +287,11 @@ defmodule TrinityCoordinator.Orchestrator do
              route.agent_id,
              run_ctx.agent_pool_opts,
              run_ctx.provider_pool
-           ) do
+           ),
+         :ok <-
+           check_latency_budget(run_ctx, trace, turn, dispatch.provider_latency_ms),
+         :ok <-
+           bump_and_check_cost_budget(run_ctx, trace, turn, dispatch) do
       response_text = dispatch.response_text
       StateManager.append_assistant(pid, response_text)
 
@@ -276,6 +306,11 @@ defmodule TrinityCoordinator.Orchestrator do
       accepted? = verifier_status == :accepted
       thinker_result = maybe_parse_thinker(role_atom, response_text)
       next_state = update_loop_state(state_for_turn, role_atom, response_text, thinker_result)
+
+      route_decision =
+        TrinityCoordinator.RouteDecision.from_route(route, transcript_hash,
+          artifact_identity: build_artifact_identity(slm_context)
+        )
 
       emit_trace(
         trace,
@@ -322,7 +357,8 @@ defmodule TrinityCoordinator.Orchestrator do
         raw_selected_role_id: Map.get(route, :raw_role_id, route.role_id),
         raw_selected_role: Map.get(route, :raw_role_name, role_name),
         role_override_from_thinker: Map.get(route, :role_override_from_thinker, false),
-        final: accepted?
+        final: accepted?,
+        route_decision: TrinityCoordinator.RouteDecision.to_trace_map(route_decision)
       })
 
       if accepted? do
@@ -334,15 +370,15 @@ defmodule TrinityCoordinator.Orchestrator do
 
         {:ok, response_text}
       else
-        do_run_loop(
+        continue_loop_after_turn(
           pid,
           {model, params},
-          turn + 1,
+          turn,
           max_turns,
           slm_context,
           run_ctx,
           trace,
-          next_state
+          {next_state, role_name, verifier_status}
         )
       end
     else
@@ -386,6 +422,25 @@ defmodule TrinityCoordinator.Orchestrator do
       _ ->
         emit_trace(trace, :run_failed, %{turn: turn, reason: :unexpected_orchestrator_state})
         {:error, :unexpected_orchestrator_state}
+    end
+  end
+
+  defp continue_loop_after_turn(
+         pid,
+         routing,
+         turn,
+         max_turns,
+         slm_context,
+         run_ctx,
+         trace,
+         {next_state, role_name, verifier_status}
+       ) do
+    case bump_and_check_verifier_revisions(run_ctx, trace, turn, role_name, verifier_status) do
+      {:error, _} = err ->
+        err
+
+      :ok ->
+        do_run_loop(pid, routing, turn + 1, max_turns, slm_context, run_ctx, trace, next_state)
     end
   end
 
@@ -777,7 +832,7 @@ defmodule TrinityCoordinator.Orchestrator do
 
   defp exceeded_provider_calls?(%{max_provider_calls: limit}, counters)
        when is_integer(limit) do
-    provider_call_count(counters) >= limit
+    provider_call_count(counters) > limit
   end
 
   defp exceeded_provider_calls?(_, _), do: false
@@ -786,7 +841,7 @@ defmodule TrinityCoordinator.Orchestrator do
 
   defp exceeded_verifier_revisions?(%{max_verifier_revisions: limit}, counters)
        when is_integer(limit) do
-    verifier_revision_count(counters) >= limit
+    verifier_revision_count(counters) > limit
   end
 
   defp exceeded_verifier_revisions?(_, _), do: false
@@ -810,4 +865,147 @@ defmodule TrinityCoordinator.Orchestrator do
     do: :counters.get(ref, 1) / 1_000_000
 
   defp estimated_cost_usd(_), do: 0.0
+
+  # --- Phase 11.2: provider latency budget ---
+
+  defp check_latency_budget(run_ctx, trace, turn, latency_ms) when is_integer(latency_ms) do
+    case run_ctx[:budgets][:max_provider_latency_ms] do
+      nil ->
+        :ok
+
+      limit when is_integer(limit) and latency_ms > limit ->
+        details = %{
+          limit_ms: limit,
+          observed_ms: latency_ms,
+          checkpoint: :after_dispatch,
+          turn: turn
+        }
+
+        emit_trace(trace, :run_failed, %{
+          reason: {:budget_exceeded, :provider_latency_ms},
+          details: details
+        })
+
+        {:error, {:budget_exceeded, :provider_latency_ms, details}}
+
+      _ ->
+        :ok
+    end
+  end
+
+  # --- Phase 11.4: estimated cost budget ---
+
+  defp bump_and_check_cost_budget(run_ctx, trace, turn, dispatch) do
+    case {run_ctx[:budgets][:max_estimated_cost_usd], run_ctx[:cost_estimator_fn]} do
+      {nil, _} ->
+        :ok
+
+      {_limit, fun} when is_function(fun, 1) ->
+        cost_usd = fun.(dispatch)
+        bump_cost(run_ctx, cost_usd)
+        check_cost_budget(run_ctx, trace, turn)
+
+      {_limit, _no_fn} ->
+        maybe_warn_missing_cost_estimator(run_ctx)
+        :ok
+    end
+  end
+
+  defp bump_cost(run_ctx, cost_usd) when is_number(cost_usd) and cost_usd >= 0 do
+    case run_ctx[:counters][:estimated_cost_micro_usd_ref] do
+      nil ->
+        :ok
+
+      ref ->
+        # Store as integer micro-USD to keep :counters as integer-only.
+        :counters.add(ref, 1, round(cost_usd * 1_000_000))
+    end
+  end
+
+  defp bump_cost(_run_ctx, _other), do: :ok
+
+  defp check_cost_budget(run_ctx, trace, turn) do
+    counters = run_ctx[:counters] || %{}
+    budgets = run_ctx[:budgets] || %{}
+
+    if exceeded_cost?(budgets, counters) do
+      details = %{
+        limit_usd: budgets[:max_estimated_cost_usd],
+        observed_usd: estimated_cost_usd(counters),
+        checkpoint: :after_dispatch,
+        turn: turn
+      }
+
+      emit_trace(trace, :run_failed, %{
+        reason: {:budget_exceeded, :estimated_cost_usd},
+        details: details
+      })
+
+      {:error, {:budget_exceeded, :estimated_cost_usd, details}}
+    else
+      :ok
+    end
+  end
+
+  defp maybe_warn_missing_cost_estimator(run_ctx) do
+    case run_ctx[:counters][:cost_warning_emitted_ref] do
+      nil ->
+        :ok
+
+      ref ->
+        if :counters.get(ref, 1) == 0 do
+          :counters.add(ref, 1, 1)
+
+          Logger.warning(
+            "max_estimated_cost_usd was set but no cost_estimator_fn was provided; " <>
+              "cost budget will not fire. See docs/agent_slot_provider_mapping.md."
+          )
+        end
+
+        :ok
+    end
+  end
+
+  # --- Phase 11.3: verifier revisions budget ---
+
+  defp bump_and_check_verifier_revisions(run_ctx, trace, turn, role_name, verifier_status) do
+    if Verifier.verifier_role?(role_name) and verifier_status != :accepted do
+      case run_ctx[:counters][:verifier_revisions_ref] do
+        nil -> :ok
+        ref -> :counters.add(ref, 1, 1)
+      end
+
+      counters = run_ctx[:counters] || %{}
+      budgets = run_ctx[:budgets] || %{}
+
+      if exceeded_verifier_revisions?(budgets, counters) do
+        details = %{
+          limit: budgets[:max_verifier_revisions],
+          observed: verifier_revision_count(counters),
+          checkpoint: :after_verifier_revision,
+          turn: turn
+        }
+
+        emit_trace(trace, :run_failed, %{
+          reason: {:budget_exceeded, :verifier_revisions},
+          details: details
+        })
+
+        {:error, {:budget_exceeded, :verifier_revisions, details}}
+      else
+        :ok
+      end
+    else
+      :ok
+    end
+  end
+
+  # --- Phase 11.5: artifact identity for RouteDecision ---
+
+  defp build_artifact_identity(slm_context) do
+    case build_runtime_metadata(slm_context) do
+      meta when is_map(meta) and map_size(meta) > 0 -> meta
+      _ -> nil
+    end
+  end
 end

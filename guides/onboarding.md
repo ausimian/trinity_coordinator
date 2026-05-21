@@ -83,8 +83,17 @@ XLA_TARGET=cuda12 mix test
 Expected current result:
 
 ```text
-1 doctest, 150 tests, 0 failures, 25 excluded
+1 doctest, 214 tests, 0 failures (24 excluded)
 ```
+
+Run the pre-flight environment validator before any other Mix task:
+
+```bash
+XLA_TARGET=cuda12 mix trinity.env.check
+```
+
+A single readable failure line is the success signal that this catches
+the `XLA_TARGET` and artifact-dir misconfigurations early.
 
 Run the static quality gates:
 

@@ -497,6 +497,13 @@ All route/demo commands now accept `--runtime-profile NAME` (`:cuda_exla`
 default; `:host_exla`, `:binary`, `:mock_tiny`, `:emlx` for non-canonical lanes).
 The default behavior is unchanged from prior releases.
 
+The orchestrator additionally accepts five enforceable budgets
+(`:max_wall_time_ms`, `:max_provider_calls`, `:max_provider_latency_ms`,
+`:max_verifier_revisions`, `:max_estimated_cost_usd`). All default to
+`nil` (unbounded). See [Production Deployment Runbook §4](docs/production_runbook.md)
+for the full contract, error tuple shape, and recommended starting values.
+
+
 All route/demo commands default to the promoted artifact directory:
 
 ```text
@@ -663,6 +670,9 @@ python3 priv/sakana_trinity/scripts/compare_sakana_parity_reports.py \
 - [Onboarding](guides/onboarding.md)
 - [Current Direction](guides/current_direction.md)
 - [Operations And Quality Gates](guides/operations_qc.md)
+- [Production Deployment Runbook](docs/production_runbook.md)
+- [Bumblebee Unpin Playbook](docs/bumblebee_unpin_playbook.md)
+- [Agent Slot ↔ Provider Mapping](docs/agent_slot_provider_mapping.md)
 
 ## Attribution
 
