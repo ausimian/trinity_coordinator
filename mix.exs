@@ -2,6 +2,34 @@ unless Code.ensure_loaded?(DependencySources) do
   Code.require_file("build_support/dependency_sources.exs", __DIR__)
 end
 
+unless Code.ensure_loaded?(XlaTargetValidator) do
+  Code.require_file("build_support/xla_target_validator.exs", __DIR__)
+end
+
+# Load the XlaEnvPreflight Mix compiler eagerly so Mix can find it before
+# the project's own `lib/` tree compiles. Compilers referenced from a
+# project's `:compilers` list must be loadable before `mix compile`
+# starts; placing the module under `lib/` would create a chicken-and-egg
+# bootstrap problem (Mix would look for the compiler module before it
+# has had a chance to compile `lib/`).
+unless Code.ensure_loaded?(Mix.Tasks.Compile.XlaEnvPreflight) do
+  Code.require_file("build_support/mix_tasks_compile_xla_env_preflight.exs", __DIR__)
+end
+
+# Eager XLA_TARGET preflight: a project's :compilers list runs AFTER
+# dependency compilation, so the in-project preflight compiler alone
+# would not catch the EXLA-side failure mode. Calling the validator
+# here, at mix.exs top level, catches mix test, mix compile,
+# mix deps.compile, and mix deps.update -- all of which evaluate
+# mix.exs before touching deps.
+#
+# When this mix.exs is being evaluated as a transitive dependency
+# (our directory sits inside some parent project's deps/), defer
+# entirely to that parent project's build configuration.
+unless __DIR__ |> Path.split() |> Enum.member?("deps") do
+  XlaTargetValidator.validate!()
+end
+
 defmodule TrinityCoordinator.MixProject do
   use Mix.Project
 
@@ -19,6 +47,7 @@ defmodule TrinityCoordinator.MixProject do
       start_permanent: Mix.env() == :prod,
       package: package(),
       docs: docs(),
+      compilers: [:xla_env_preflight] ++ Mix.compilers(),
       elixirc_paths: elixirc_paths(Mix.env()),
       dialyzer: [
         plt_add_apps: [:mix],

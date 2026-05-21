@@ -179,7 +179,36 @@ This applies even on hosts whose installed CUDA toolkit is 13.x. The
 `XLA_TARGET` controls which prebuilt XLA artifact is fetched; mismatched
 host CUDA installations are tolerated by EXLA via dynamic loading.
 
-The pre-flight task surfaces this fast:
+### Automatic preflight
+
+As of 2026-05-21, the project surfaces this automatically via a Mix
+preflight that runs from `mix.exs` before any compilation step. An
+operator whose shell exports `XLA_TARGET=cuda13` will see a single
+readable line instead of an EXLA stacktrace:
+
+```text
+** (Mix.Error) XLA_TARGET="cuda13" is not accepted by the bundled xla 0.9.x.
+Accepted values: "cpu", "cuda", "cuda12", "rocm", "tpu".
+Recommended for CUDA hosts: export XLA_TARGET=cuda12.
+Recommended for CPU hosts: unset XLA_TARGET (or use cpu).
+The bundled xla rejects unrecognised targets at compile time, so EXLA
+cannot compile until XLA_TARGET is corrected.
+```
+
+This fires for `mix compile`, `mix test`, `mix deps.compile`,
+`mix deps.update`, `mix credo`, `mix dialyzer`, `mix docs`, and any
+other task that evaluates `mix.exs`. To bypass it for one command,
+prefix the invocation:
+
+```bash
+XLA_TARGET=cuda12 mix help
+```
+
+### Manual preflight (alternative)
+
+`mix trinity.env.check` is the operator-facing preflight task; it
+performs the same validation and additionally accepts
+`--require TARGET` and `--artifact-dir DIR` options:
 
 ```bash
 mix trinity.env.check

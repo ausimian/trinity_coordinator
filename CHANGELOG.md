@@ -1,5 +1,45 @@
 # Changelog
 
+## 2026-05-21
+
+### Added
+- `XlaTargetValidator` — shared `XLA_TARGET` validator at
+  `build_support/xla_target_validator.exs`. Mirrors the bundled
+  `xla 0.9.x` acceptance list exactly (`cpu`, `cuda`, `cuda12`,
+  `rocm`, `tpu`) and raises a single readable `Mix.Error` for any
+  other value, naming `cuda12` as the recommended remediation and
+  pointing at `guides/troubleshooting.md`.
+- `Mix.Tasks.Compile.XlaEnvPreflight` — Mix compiler that delegates
+  to `XlaTargetValidator.validate!/0`. Registered in `mix.exs` via
+  `compilers: [:xla_env_preflight] ++ Mix.compilers()`.
+- Top-level eager `XlaTargetValidator.validate!/0` call in
+  `mix.exs`, gated by an under-`deps/` check. Catches the
+  `XLA_TARGET=cuda13` failure mode for `mix test`,
+  `mix deps.compile`, `mix deps.update`, and other tasks that
+  evaluate `mix.exs` before touching dependency compilation.
+  Without this gate, the `:compilers` list alone would not help
+  because the project's compilers run *after* dependency
+  compilation, and the EXLA-side `RuntimeError` would still appear
+  first.
+- 11 tests in `test/build_support/xla_target_validator_test.exs`
+  covering: unset, empty, every accepted target, `cuda13`,
+  arbitrary garbage, case mismatch, trailing whitespace, and the
+  helper accessors.
+
+### Changed
+- `guides/troubleshooting.md` — `XLA_TARGET=cuda13` section now
+  reflects that the project surfaces this automatically; the
+  `mix trinity.env.check` recipe is preserved as a manual
+  alternative.
+
+### Bug fix surface
+- Replaces the EXLA-side `RuntimeError` stacktrace from
+  `deps/exla/mix.exs:116` with a single readable `** (Mix.Error)`
+  line that names the bad value, the accepted set, and the
+  remediation. Verified against `mix compile`, `mix test`, and
+  `mix deps.compile exla --force`, all of which now fail at
+  `mix.exs:30` instead of inside the EXLA compile step.
+
 ## 2026-05-20 (Phase 11 follow-up)
 
 ### Added
