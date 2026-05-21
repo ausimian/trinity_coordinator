@@ -95,6 +95,37 @@ XLA_TARGET=cuda12 mix trinity.env.check
 A single readable failure line is the success signal that this catches
 the `XLA_TARGET` and artifact-dir misconfigurations early.
 
+### Fetch the adapted artifact bundle
+
+A fresh clone does not contain the 624 MB adapted artifact bundle (it is
+generated output, gitignored). Fetch it in one command:
+
+```bash
+mix trinity.artifact.fetch
+```
+
+This downloads the bundle from the project's HuggingFace dataset
+repository, verifies each file against the pinned SHA-256 manifest at
+`priv/sakana_trinity/artifact_pin.json`, and writes the files into
+`priv/sakana_trinity/adapted_qwen3_0_6b_layer26/`. See
+[Artifact Distribution](artifact_distribution.md) for offline,
+custom-destination, and publisher workflows.
+
+If you intend to **rebuild** the bundle on your own hardware (e.g. for
+EMLX validation on Apple Silicon), skip the fetch and follow
+[Sakana Artifacts And Export](artifacts_and_export.md) instead. The
+fetch and the rebuild are equivalent endpoints; pick whichever fits
+your situation.
+
+### Choose a runtime profile (default is fine on CUDA)
+
+The router and exporter both accept a `--runtime-profile` flag. The
+default `:cuda_exla` profile works for the existing Linux/CUDA path.
+For Apple Silicon, add `{:emlx, "~> 0.3"}` to your parent app and use
+`--runtime-profile emlx`. For CPU-only sanity checks, use
+`--runtime-profile cpu_binary`. See [Runtime Profiles](runtime_profiles.md)
+for the full menu.
+
 Run the static quality gates:
 
 ```bash

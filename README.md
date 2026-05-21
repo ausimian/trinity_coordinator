@@ -124,7 +124,7 @@ not committed to git. A fresh clone will not contain:
 priv/sakana_trinity/adapted_qwen3_0_6b_layer26/
 ```
 
-That directory is about 624 MB in the current local build and should contain:
+That directory is about 624 MB and contains:
 
 ```text
 manifest.json
@@ -132,14 +132,40 @@ router_head.safetensors
 checkpoints/*.safetensors
 ```
 
-For normal onboarding, use a blessed artifact bundle and place it at the path
-above. After that, no Python setup is required for local route demos or mock
-orchestration.
+**Recommended onboarding (one command):**
 
-If you need to rebuild the artifact instead of copying a bundle, use the export
-and import workflow in [Sakana Artifacts And Export](guides/artifacts_and_export.md).
-That path loads Qwen and performs SVD/SVF work, so it is heavier than normal
-first-run setup.
+```bash
+mix trinity.artifact.fetch
+```
+
+This downloads the bundle from the project's HuggingFace dataset repository,
+verifies the SHA-256 of every file against the pinned descriptor at
+`priv/sakana_trinity/artifact_pin.json`, and writes the files into the path
+above. Files already present with the correct SHA-256 are skipped, so repeat
+invocations are cheap. The standard HuggingFace cache at
+`~/.cache/huggingface/` is honored, so a second fresh clone on the same host
+is instant.
+
+For air-gapped CI add `--offline`:
+
+```bash
+HF_HUB_OFFLINE=1 mix trinity.artifact.fetch --offline
+```
+
+For a different destination (forks, multi-version side-by-side):
+
+```bash
+mix trinity.artifact.fetch --dest priv/sakana_trinity/my_alt_bundle
+```
+
+If you need to **rebuild** the artifact instead of fetching the released
+bundle, use the export and import workflow in
+[Sakana Artifacts And Export](guides/artifacts_and_export.md). That path loads
+Qwen and performs SVD/SVF work, so it is heavier than the fetch flow but
+useful when you want to (a) validate the export pipeline end to end, (b) run
+on a non-CUDA backend such as EMLX on Apple Silicon (see
+[Runtime Profiles](guides/runtime_profiles.md)), or (c) fork the project and
+publish your own bundle (see [Artifact Distribution](guides/artifact_distribution.md)).
 
 ## Current Status
 

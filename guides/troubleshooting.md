@@ -214,3 +214,90 @@ performs the same validation and additionally accepts
 mix trinity.env.check
 ```
 
+
+## Artifact Fetch Failed
+
+### `cannot load pin "priv/sakana_trinity/artifact_pin.json"`
+
+The pin file is committed to the repo. If a fresh clone reports this,
+something is unusual — the pin should always be present. Check
+`git status` and reset if needed:
+
+```bash
+git checkout HEAD -- priv/sakana_trinity/artifact_pin.json
+```
+
+### `trinity.artifact.fetch failed for ...: {:checksum_mismatch, expected, actual}`
+
+A file was downloaded but its SHA-256 did not match the pinned value.
+Most often a partial download or a corrupt cache entry. Clear the
+file from the HuggingFace cache and retry:
+
+```bash
+rm -rf ~/.cache/huggingface/hub/datasets--nshkrdotcom--trinity-coordinator-adapted-qwen3-0.6b
+mix trinity.artifact.fetch
+```
+
+If the mismatch persists after a clean re-download, file an issue; the
+pin and the published bundle disagree.
+
+### `:enoent` or HTTP-level error during fetch
+
+HuggingFace was unreachable. Retry. For chronic outages or air-gapped
+hosts, use the GitHub Release fallback documented in
+[Artifact Distribution §3](artifact_distribution.md).
+
+### `offline mode and file not cached`
+
+You invoked `mix trinity.artifact.fetch --offline` or
+`HF_HUB_OFFLINE=1` against a cold cache. Drop the offline flag once
+to warm the cache; subsequent offline runs hit the cache.
+
+## EMLX / Apple Silicon
+
+### `Profile :emlx requires backend Elixir.EMLX.Backend which is not loaded`
+
+The `:emlx` runtime profile is the Apple Silicon lane. EMLX is an
+**optional** dependency — the project does not pull it on Linux/CUDA
+hosts. To use the profile, add the dep to your parent application:
+
+```elixir
+# mix.exs
+def deps do
+  [
+    {:trinity_coordinator, "~> 0.2"},
+    {:emlx, "~> 0.3"}      # <-- add this
+  ]
+end
+```
+
+then `mix deps.get`. The next `mix run examples/qwen_router_prompt_eval.exs --runtime-profile emlx`
+should pick up `EMLX.Backend` cleanly.
+
+### Exporter raises `:unaccepted_backend` on Apple
+
+The exporter validates that each adapted tensor was materialised on a
+backend the runtime profile accepts. If you ran the export with
+`--runtime-profile cuda_exla` on an Apple host, the validation will
+reject the resulting EMLX-shaped tensors. Re-run with the correct
+profile:
+
+```bash
+mix trinity.sakana.export_adapted --runtime-profile emlx \
+  --svd-compute-type f32 \
+  --out priv/sakana_trinity/adapted_qwen3_0_6b_layer26
+```
+
+The `--svd-compute-type f32` flag is recommended on EMLX because the
+thin-SVD path uses `Nx.LinAlg.svd`'s default implementation (which
+goes through `eigh`); doing that work in f32 keeps the small-σ tail
+precise.
+
+### EMLX OOM on the embedder SVD
+
+If your EMLX version is older than v0.3.0, the native SVD path
+materialises the full `m × m` U matrix on the Qwen3-0.6B embedder
+(`m = 151_936`, ~92 GB). Upgrade to `{:emlx, "~> 0.3"}` — Paulo
+Valente's commit `3482b79` ("fix: use nx-defined implementation for
+non-full svd computation") routes `full_matrices?: false` through
+Nx's default path and keeps the work at `min(m, n)² = 1024²`.

@@ -143,6 +143,8 @@ defmodule TrinityCoordinator.MixProject do
         "guides/provider_service_hardening.md",
         "guides/operations_qc.md",
         "guides/troubleshooting.md",
+        "guides/runtime_profiles.md",
+        "guides/artifact_distribution.md",
         "docs/sakana_svd_byte_match_rigor_plan.md",
         "docs/sakana_svd_parity_debug_checklist.md",
         "docs/elixir_svd_decomposition.md",
@@ -175,7 +177,9 @@ defmodule TrinityCoordinator.MixProject do
           "guides/service_buildout.md",
           "guides/provider_service_hardening.md",
           "guides/operations_qc.md",
-          "guides/troubleshooting.md"
+          "guides/troubleshooting.md",
+          "guides/runtime_profiles.md",
+          "guides/artifact_distribution.md"
         ],
         "Operator Runbooks": [
           "docs/agent_slot_provider_mapping.md",
