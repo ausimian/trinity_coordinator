@@ -83,8 +83,8 @@ defmodule XlaTargetValidator do
         "Recommended for CPU hosts: unset XLA_TARGET (or use cpu). " <>
         "The bundled xla rejects unrecognised targets at compile time, so EXLA " <>
         "cannot compile until XLA_TARGET is corrected. See " <>
-        "guides/troubleshooting.md (\"XLA_TARGET=cuda13 Is Rejected At Compile " <>
-        "Time\") for the canonical recipe."
+        "guides/troubleshooting.md (\"XLA_TARGET Rejected At Compile Time\") " <>
+        "for the canonical recipe."
     )
   end
 end

@@ -8,12 +8,12 @@ defmodule Mix.Tasks.Compile.XlaEnvPreflight do
   ## Why this exists
 
   Without this preflight, an unrecognised `XLA_TARGET` (for example
-  `cuda13` against the bundled `xla 0.9.x`) surfaces as a `RuntimeError`
+  `cuda14` against the bundled `xla 0.10.x`) surfaces as a `RuntimeError`
   stacktrace from `deps/exla/mix.exs` during dependency compilation:
 
       ** (RuntimeError) expected XLA_TARGET to be one of
-         "cpu", "cuda", "rocm", "tpu", "cuda12", but got: "cuda13"
-          (xla 0.9.1) lib/xla.ex:82: XLA.xla_target/0
+         "cpu", "cuda", "rocm", "tpu", "cuda12", "cuda13", but got: "cuda14"
+          (xla 0.10.0) lib/xla.ex:82: XLA.xla_target/0
           ...
 
   With this preflight, the project surfaces the failure with a single

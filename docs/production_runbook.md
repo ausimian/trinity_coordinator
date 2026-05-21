@@ -29,8 +29,10 @@ Common output:
 trinity.env.check: ok / xla_target=cuda12
 ```
 
-Known gotcha: `XLA_TARGET=cuda13` is rejected at compile time by
-`xla 0.9.1`. Use `cuda12`.
+Known gotcha: `XLA_TARGET` is validated before EXLA compiles. With the
+current `xla 0.10.x` stack, `cuda13` is accepted; `cuda12` remains the
+recommended default for CUDA hosts. Unsupported values such as `cuda14` fail
+fast with a readable `Mix.Error`.
 
 ## 2. Canonical artifact
 
