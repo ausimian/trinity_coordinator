@@ -59,7 +59,8 @@ defmodule Mix.Tasks.Trinity.Sakana.ExportAdapted do
         skip_existing: :boolean,
         dry_run: :boolean,
         svd_compute_type: :string,
-        json: :boolean
+        json: :boolean,
+        runtime_profile: :string
       ]
     )
   end
@@ -78,7 +79,11 @@ defmodule Mix.Tasks.Trinity.Sakana.ExportAdapted do
       skip_existing: Keyword.get(opts, :skip_existing, true),
       dry_run: Keyword.get(opts, :dry_run, false),
       svd_compute_type: Keyword.get(opts, :svd_compute_type, "source"),
-      progress: progress_fun(Keyword.get(opts, :json, false))
+      progress: progress_fun(Keyword.get(opts, :json, false)),
+      runtime_profile:
+        TrinityCoordinator.MixHelpers.runtime_profile_atom!(
+          Keyword.get(opts, :runtime_profile, "cuda_exla")
+        )
     ]
   end
 

@@ -56,11 +56,10 @@ defmodule TrinityCoordinator.SLMProfile do
       xla_target: "cuda12",
       status: :ready,
       load_options: [
-        backend: {EXLA.Backend, client: :cuda},
         type: :bf16
       ],
       notes:
-        "Qwen3-0.6B causal-LM coordinator profile for CUDA-backed hidden-state extraction and Sakana SVF tensor selection"
+        "Qwen3-0.6B causal-LM coordinator profile for hidden-state extraction and Sakana SVF tensor selection"
     }
   end
 
@@ -91,7 +90,6 @@ defmodule TrinityCoordinator.SLMProfile do
         cast_tensors: true
       ],
       load_options: [
-        backend: {EXLA.Backend, client: :cuda},
         type: :bf16
       ],
       notes:

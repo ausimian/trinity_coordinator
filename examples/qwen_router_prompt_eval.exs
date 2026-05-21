@@ -80,6 +80,7 @@ defmodule Examples.QwenRouterPromptEval do
           min_agent_margin: :float,
           min_role_margin: :float,
           no_assert: :boolean,
+          runtime_profile: :string,
           show_logits: :boolean,
           snapshot: :string,
           snapshot_out: :string,
@@ -180,9 +181,19 @@ defmodule Examples.QwenRouterPromptEval do
     snapshot_expected = if snapshot_in, do: Jason.decode!(File.read!(snapshot_in)), else: nil
 
     HITL.banner("QWEN ROUTER PROMPT EVAL")
-    Runtime.put_cuda_backend!()
 
-    coordinator = TrinityCoordinator.MixHelpers.load_coordinator!(artifact_dir: artifact_dir)
+    runtime_profile_name =
+      TrinityCoordinator.MixHelpers.runtime_profile_atom!(
+        Keyword.get(opts, :runtime_profile, "cuda_exla")
+      )
+
+    TrinityCoordinator.RuntimeProfile.put_default_backend!(runtime_profile_name)
+
+    coordinator =
+      TrinityCoordinator.MixHelpers.load_coordinator!(
+        artifact_dir: artifact_dir,
+        runtime_profile: runtime_profile_name
+      )
 
     IO.puts("""
 

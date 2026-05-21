@@ -13,7 +13,7 @@ defmodule Mix.Tasks.Trinity.Sakana.RouterTrace do
 
   use Mix.Task
 
-  alias TrinityCoordinator.{Extractor, HITL, MixHelpers, Runtime}
+  alias TrinityCoordinator.{Extractor, HITL, MixHelpers}
   alias TrinityCoordinator.Sakana.Artifact
 
   @shortdoc "Emit fixed-transcript Sakana router trace"
@@ -37,16 +37,16 @@ defmodule Mix.Tasks.Trinity.Sakana.RouterTrace do
     opts = parse_args!(args)
 
     HITL.banner("TRINITY SAKANA ROUTER TRACE")
-    Runtime.put_cuda_backend!()
 
-    runtime_profile = MixHelpers.runtime_profile_atom!(Map.get(opts, :runtime_profile, nil))
+    runtime_profile_name =
+      MixHelpers.runtime_profile_atom!(Map.get(opts, :runtime_profile, "cuda_exla"))
+
+    TrinityCoordinator.RuntimeProfile.put_default_backend!(runtime_profile_name)
 
     coordinator =
       MixHelpers.load_coordinator!(
-        Keyword.merge(
-          [artifact_dir: opts.artifact_dir],
-          if(runtime_profile, do: [runtime_profile: runtime_profile], else: [])
-        )
+        artifact_dir: opts.artifact_dir,
+        runtime_profile: runtime_profile_name
       )
 
     messages = [%{"role" => "user", "content" => opts.message}]

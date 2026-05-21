@@ -122,7 +122,7 @@ defmodule TrinityCoordinator.RuntimeProfile do
   def resolve(:emlx) do
     %__MODULE__{
       name: :emlx,
-      nx_backend: Nx.BinaryBackend,
+      nx_backend: {EMLX.Backend, device: :gpu},
       require_cuda?: false,
       qwen_runtime?: true,
       export_svd?: true,
@@ -130,11 +130,8 @@ defmodule TrinityCoordinator.RuntimeProfile do
       artifact_runtime?: true,
       default_slm_profile: :qwen_coordinator,
       notes: [
-        "Apple Silicon profile. Native MLX SVD may materialize full matrices; ",
-        "see docs 18/19 for the upstream Nx/EMLX discussion."
-      ],
-      warnings: [
-        "EMLX backend is descriptive here; the host application must actually load it."
+        "Apple Silicon profile. Requires the optional {:emlx, \"~> 0.3\"} dependency. ",
+        "See guides/runtime_profiles.md for setup."
       ]
     }
   end
@@ -159,4 +156,94 @@ defmodule TrinityCoordinator.RuntimeProfile do
   """
   @spec builtin_names() :: [atom()]
   def builtin_names, do: [:cuda_exla, :host_exla, :binary, :mock_tiny, :emlx]
+
+  @doc """
+  Sets the current process default Nx backend to the profile's backend.
+
+  Behaviour:
+
+    * `:require_cuda? == true` profiles delegate to
+      `TrinityCoordinator.Runtime.put_cuda_backend!/0` for back-compat.
+    * Profiles whose `:nx_backend` module is loaded set the global default
+      via `Nx.global_default_backend/1`.
+    * Profiles whose `:nx_backend` module is **not** loaded raise an
+      informative error naming the profile and the missing module.
+
+  The not-loaded path is what catches a user invoking
+  `--runtime-profile emlx` on a host that has not added `{:emlx, "~> 0.3"}`
+  to their parent application.
+  """
+  @spec put_default_backend!(t() | atom() | {atom(), keyword()}) :: :ok
+  def put_default_backend!(name_or_profile) do
+    profile = resolve(name_or_profile)
+    do_put_default_backend!(profile)
+  end
+
+  defp do_put_default_backend!(%__MODULE__{require_cuda?: true}) do
+    TrinityCoordinator.Runtime.put_cuda_backend!()
+    :ok
+  end
+
+  defp do_put_default_backend!(%__MODULE__{nx_backend: backend} = profile) do
+    {mod, _opts} = backend_module_and_opts(backend)
+
+    if Code.ensure_loaded?(mod) do
+      Nx.global_default_backend(backend)
+      :ok
+    else
+      raise "Runtime profile #{inspect(profile.name)} requires backend " <>
+              inspect(mod) <>
+              " which is not loaded in this BEAM. Add the corresponding dependency " <>
+              "to your parent application\'s mix.exs and run mix deps.get. " <>
+              "See guides/runtime_profiles.md."
+    end
+  end
+
+  defp backend_module_and_opts({mod, opts}) when is_atom(mod) and is_list(opts), do: {mod, opts}
+  defp backend_module_and_opts(mod) when is_atom(mod), do: {mod, []}
+
+  @doc """
+  Returns true when the given tensor-backend label (as produced by
+  `TrinityCoordinator.Runtime.tensor_backend/1`) is one this profile
+  accepts.
+
+  Used by the exporter\'s per-tensor backend validation: a profile is
+  expected to receive tensors materialised on its own backend; anything
+  else is a configuration error.
+
+  ## Examples
+
+      iex> profile = TrinityCoordinator.RuntimeProfile.resolve(:cuda_exla)
+      iex> TrinityCoordinator.RuntimeProfile.accepts_backend_label?(profile, "EXLA.Backend<cuda:0>")
+      true
+      iex> TrinityCoordinator.RuntimeProfile.accepts_backend_label?(profile, "EMLX.Backend")
+      false
+  """
+  @spec accepts_backend_label?(t(), String.t()) :: boolean()
+  def accepts_backend_label?(%__MODULE__{nx_backend: backend}, observed)
+      when is_binary(observed) do
+    {mod, opts} = backend_module_and_opts(backend)
+    expected_prefixes = expected_label_prefixes(mod, opts)
+    Enum.any?(expected_prefixes, &String.starts_with?(observed, &1))
+  end
+
+  defp expected_label_prefixes(EXLA.Backend, opts) do
+    case Keyword.get(opts, :client) do
+      :cuda -> ["EXLA.Backend<cuda:"]
+      :host -> ["EXLA.Backend<host:"]
+      _ -> ["EXLA.Backend<"]
+    end
+  end
+
+  defp expected_label_prefixes(Nx.BinaryBackend, _opts), do: ["Nx.BinaryBackend"]
+
+  defp expected_label_prefixes(mod, _opts) do
+    # Default: use the module\'s inspect representation as a label prefix.
+    label =
+      mod
+      |> Module.split()
+      |> Enum.join(".")
+
+    [label]
+  end
 end

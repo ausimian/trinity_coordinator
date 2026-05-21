@@ -1,5 +1,5 @@
 defmodule TrinityCoordinator.RuntimeProfileTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   alias TrinityCoordinator.RuntimeProfile
 
@@ -35,9 +35,14 @@ defmodule TrinityCoordinator.RuntimeProfileTest do
       assert p.default_slm_profile == :tiny_synthetic
     end
 
-    test ":emlx is descriptive and includes warnings about backend presence" do
+    test ":emlx maps to EMLX.Backend with device: :gpu and does not require CUDA" do
       p = RuntimeProfile.resolve(:emlx)
-      assert match?([_ | _], p.warnings)
+      assert p.name == :emlx
+      assert p.nx_backend == {EMLX.Backend, device: :gpu}
+      assert p.require_cuda? == false
+      assert p.qwen_runtime? == true
+      assert p.export_svd? == true
+      assert p.default_slm_profile == :qwen_coordinator
       assert match?([_ | _], p.notes)
     end
 
@@ -70,6 +75,88 @@ defmodule TrinityCoordinator.RuntimeProfileTest do
       for name <- RuntimeProfile.builtin_names() do
         assert %RuntimeProfile{} = RuntimeProfile.resolve(name)
       end
+    end
+  end
+
+  describe "put_default_backend!/1" do
+    test ":binary profile sets Nx.BinaryBackend without raising" do
+      original = Nx.default_backend()
+      on_exit(fn -> Nx.global_default_backend(original) end)
+
+      :ok = RuntimeProfile.put_default_backend!(:binary)
+      assert Nx.default_backend() == {Nx.BinaryBackend, []}
+    end
+
+    test "profile whose backend module is not loaded raises an informative error" do
+      synthetic = %RuntimeProfile{
+        name: :synthetic_missing,
+        nx_backend: {:"Elixir.NoSuchBackend.Missing", []},
+        require_cuda?: false
+      }
+
+      raised =
+        try do
+          RuntimeProfile.put_default_backend!(synthetic)
+        rescue
+          e -> e
+        end
+
+      msg = Exception.message(raised)
+
+      assert String.contains?(msg, ":synthetic_missing") or
+               String.contains?(msg, "NoSuchBackend")
+    end
+
+    test ":emlx profile raises an EMLX-specific error when EMLX.Backend is not loaded" do
+      # On CUDA hosts EMLX.Backend is absent (optional dep). Confirm the
+      # raise message names the dep so the operator knows what to add.
+      raised =
+        try do
+          RuntimeProfile.put_default_backend!(:emlx)
+        rescue
+          e -> e
+        else
+          _ ->
+            # If we get here, EMLX is loaded on this host; that is also acceptable.
+            nil
+        end
+
+      if raised do
+        msg = Exception.message(raised)
+        assert String.contains?(msg, "EMLX")
+      end
+    end
+  end
+
+  describe "accepts_backend_label?/2" do
+    test ":cuda_exla accepts EXLA.Backend<cuda:N> labels" do
+      profile = RuntimeProfile.resolve(:cuda_exla)
+      assert RuntimeProfile.accepts_backend_label?(profile, "EXLA.Backend<cuda:0>")
+      refute RuntimeProfile.accepts_backend_label?(profile, "EMLX.Backend")
+      refute RuntimeProfile.accepts_backend_label?(profile, "Nx.BinaryBackend")
+    end
+
+    test ":host_exla accepts EXLA.Backend<host:N> labels" do
+      profile = RuntimeProfile.resolve(:host_exla)
+      assert RuntimeProfile.accepts_backend_label?(profile, "EXLA.Backend<host:0>")
+      refute RuntimeProfile.accepts_backend_label?(profile, "EXLA.Backend<cuda:0>")
+    end
+
+    test ":emlx accepts EMLX.Backend labels" do
+      profile = RuntimeProfile.resolve(:emlx)
+      assert RuntimeProfile.accepts_backend_label?(profile, "EMLX.Backend")
+      refute RuntimeProfile.accepts_backend_label?(profile, "EXLA.Backend<cuda:0>")
+    end
+
+    test ":binary accepts Nx.BinaryBackend labels" do
+      profile = RuntimeProfile.resolve(:binary)
+      assert RuntimeProfile.accepts_backend_label?(profile, "Nx.BinaryBackend")
+      refute RuntimeProfile.accepts_backend_label?(profile, "EXLA.Backend<cuda:0>")
+    end
+
+    test "{:custom, mod, opts} accepts strings beginning with module label" do
+      profile = RuntimeProfile.resolve({:custom, Nx.BinaryBackend, []})
+      assert RuntimeProfile.accepts_backend_label?(profile, "Nx.BinaryBackend")
     end
   end
 end

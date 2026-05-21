@@ -47,7 +47,8 @@ defmodule TrinityCoordinator.Sakana.Exporter do
         skip_existing: true,
         dry_run: false,
         svd_compute_type: :source,
-        progress: nil
+        progress: nil,
+        runtime_profile: :cuda_exla
       )
       |> normalize_options()
 
@@ -82,7 +83,7 @@ defmodule TrinityCoordinator.Sakana.Exporter do
          {:ok, out_dir, manifest_hint, profile} <- prepare_output(opts),
          {:ok, source_vector} <- load_source_vector(opts),
          {:ok, split} <- split_router_vector(source_vector, opts[:spec]),
-         {:ok, model_info} <- load_profile(profile),
+         {:ok, model_info} <- load_profile(profile, opts[:runtime_profile]),
          {:ok, selected} <- select_tensors(model_info, opts[:spec]),
          :ok <- validate_selection(selected, split.scale_offsets, opts[:spec]),
          {:ok, manifest} <-
@@ -166,7 +167,7 @@ defmodule TrinityCoordinator.Sakana.Exporter do
     with :ok <- validate_only_index(opts[:only_index]),
          {:ok, source_vector} <- load_source_vector(opts),
          {:ok, split} <- split_router_vector(source_vector, opts[:spec]),
-         {:ok, model_info} <- load_profile(profile),
+         {:ok, model_info} <- load_profile(profile, opts[:runtime_profile]),
          {:ok, selected} <- select_tensors(model_info, opts[:spec]),
          :ok <- validate_selection(selected, split.scale_offsets, opts[:spec]) do
       {:ok, dry_run_manifest(opts, source_vector, split, selected)}
@@ -256,8 +257,8 @@ defmodule TrinityCoordinator.Sakana.Exporter do
     File.mkdir_p!(Artifact.checkpoint_path(out_dir))
   end
 
-  defp load_profile(profile) do
-    Runtime.put_cuda_backend!()
+  defp load_profile(profile, runtime_profile) do
+    TrinityCoordinator.RuntimeProfile.put_default_backend!(runtime_profile)
 
     case SLMProfile.load_profile(profile) do
       {:ok, {model_info, _tokenizer}} ->
@@ -782,6 +783,7 @@ defmodule TrinityCoordinator.Sakana.Exporter do
 
   defp export_tensor(out_dir, source_tensor, entry, scale_offsets, opts) do
     progress_fun = opts[:progress]
+    runtime_profile = TrinityCoordinator.RuntimeProfile.resolve(opts[:runtime_profile])
 
     emit_progress(out_dir, progress_fun, %{
       event: :tensor_export_started,
@@ -795,17 +797,17 @@ defmodule TrinityCoordinator.Sakana.Exporter do
 
     with {:ok, decomposition, decompose_ms, decompose_source} <-
            timed_decompose(source_tensor, opts[:svd_compute_type]),
-         :ok <- ensure_cuda_backend(decomposition.u, entry["path"]),
-         :ok <- ensure_cuda_backend(decomposition.s, entry["path"]),
-         :ok <- ensure_cuda_backend(decomposition.v, entry["path"]),
-         :ok <- ensure_cuda_backend(source_tensor, entry["path"]),
+         :ok <- ensure_export_backend(decomposition.u, entry["path"], runtime_profile),
+         :ok <- ensure_export_backend(decomposition.s, entry["path"], runtime_profile),
+         :ok <- ensure_export_backend(decomposition.v, entry["path"], runtime_profile),
+         :ok <- ensure_export_backend(source_tensor, entry["path"], runtime_profile),
          {:ok, adapted_tensor, reconstruct_ms} <-
            timed_reconstruct(
              decomposition,
              Nx.as_type(offsets, Nx.type(decomposition.s)),
              source_tensor
            ),
-         :ok <- ensure_cuda_backend(adapted_tensor, entry["path"]),
+         :ok <- ensure_export_backend(adapted_tensor, entry["path"], runtime_profile),
          {:ok, checksum} <-
            write_checkpoint(
              out_dir,
@@ -874,13 +876,13 @@ defmodule TrinityCoordinator.Sakana.Exporter do
     e -> {:error, {:reconstruct_error, Exception.message(e)}}
   end
 
-  defp ensure_cuda_backend(tensor, path) do
+  defp ensure_export_backend(tensor, path, runtime_profile) do
     backend = Runtime.tensor_backend(tensor)
 
-    if String.contains?(backend, "EXLA.Backend<cuda:") do
+    if TrinityCoordinator.RuntimeProfile.accepts_backend_label?(runtime_profile, backend) do
       :ok
     else
-      {:error, {:non_cuda_backend, path, backend}}
+      {:error, {:unaccepted_export_backend, path, backend, runtime_profile.name}}
     end
   end
 

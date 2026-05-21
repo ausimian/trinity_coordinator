@@ -24,6 +24,26 @@ defmodule TrinityCoordinator.SLMProfileTest do
     assert profile.module == Bumblebee.Text.Qwen3
   end
 
+  test "qwen_coordinator load_options carry :type but not :backend" do
+    profile = SLMProfile.qwen_coordinator()
+    load_options = Map.fetch!(profile, :load_options)
+
+    assert Keyword.get(load_options, :type) == :bf16
+
+    refute Keyword.has_key?(load_options, :backend),
+           "qwen_coordinator must not bake in a backend; backend is a runtime profile concern"
+  end
+
+  test "qwen_sakana_adapted load_options carry :type but not :backend" do
+    profile = SLMProfile.qwen_sakana_adapted()
+    load_options = Map.fetch!(profile, :load_options)
+
+    assert Keyword.get(load_options, :type) == :bf16
+
+    refute Keyword.has_key?(load_options, :backend),
+           "qwen_sakana_adapted must not bake in a backend; backend is a runtime profile concern"
+  end
+
   test "compatibility_probe reports supported modules for ready profiles" do
     {:ok, probe} = SLMProfile.compatibility_probe(:tiny_gpt2)
 

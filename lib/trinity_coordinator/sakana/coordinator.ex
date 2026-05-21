@@ -80,6 +80,7 @@ defmodule TrinityCoordinator.Sakana.Coordinator do
         allow_incomplete: false,
         cast_tensors: true
       )
+      |> Map.update!(:load_options, fn lo -> Keyword.put(lo, :backend, backend) end)
 
     with {:ok, {model_info, tokenizer}} <- SLMProfile.load_profile(slm_profile),
          {:ok, manifest} <- Artifact.load_manifest(opts[:artifact_dir]),
