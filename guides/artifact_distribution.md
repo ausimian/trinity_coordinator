@@ -118,7 +118,7 @@ against silent regressions in the commit payload format.
 
 ```elixir
 artifact_dir = "priv/sakana_trinity/adapted_qwen3_0_6b_layer26"
-repo_id      = "your-org/trinity-coordinator-adapted-qwen3-0.6b"
+repo_id      = "nshkrdotcom/trinity-coordinator-adapted-qwen3-0.6b"
 token        = System.fetch_env!("HF_TOKEN")
 
 # 1. Create the dataset repo (idempotent with `exist_ok: true`).
@@ -195,7 +195,7 @@ points at the new revision:
 XLA_TARGET=cuda12 mix run build_support/build_artifact_pin.exs \
   --manifest priv/sakana_trinity/adapted_qwen3_0_6b_layer26/manifest.json \
   --bundle-dir priv/sakana_trinity/adapted_qwen3_0_6b_layer26 \
-  --repo-id your-org/trinity-coordinator-adapted-qwen3-0.6b \
+  --repo-id nshkrdotcom/trinity-coordinator-adapted-qwen3-0.6b \
   --revision v1.0.0 \
   --out priv/sakana_trinity/artifact_pin.json
 ```
@@ -210,7 +210,7 @@ has `:hf_hub` and `:jason` as dependencies, verify the public tag can
 resolve `manifest.json`:
 
 ```elixir
-repo_id = "your-org/trinity-coordinator-adapted-qwen3-0.6b"
+repo_id = "nshkrdotcom/trinity-coordinator-adapted-qwen3-0.6b"
 
 {:ok, path} =
   HfHub.Download.hf_hub_download(
@@ -256,7 +256,7 @@ under that.
 ```bash
 TARBALL=adapted_qwen3_0_6b_layer26-v1.0.0.tar.gz
 curl -L -o /tmp/$TARBALL \
-  https://github.com/your-org/trinity_coordinator/releases/download/v1.0.0-artifact-only/$TARBALL
+  https://github.com/nshkrdotcom/trinity_coordinator/releases/download/v1.0.0-artifact-only/$TARBALL
 
 echo "<expected-sha256>  /tmp/$TARBALL" | sha256sum -c -
 tar xzf /tmp/$TARBALL -C priv/sakana_trinity/
