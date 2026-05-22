@@ -83,6 +83,7 @@ defmodule TrinityCoordinator.Sakana.Coordinator do
       |> Map.update!(:load_options, fn lo -> Keyword.put(lo, :backend, backend) end)
 
     with {:ok, {model_info, tokenizer}} <- SLMProfile.load_profile(slm_profile),
+         {:ok, model_info} <- maybe_apply_fast_kernels(model_info, profile),
          {:ok, manifest} <- Artifact.load_manifest(opts[:artifact_dir]),
          head_weights <- Artifact.load_router_head!(opts[:artifact_dir], manifest: manifest),
          {:ok, head_state} <-
@@ -113,6 +114,25 @@ defmodule TrinityCoordinator.Sakana.Coordinator do
     e ->
       {:error, {:coordinator_load_error, Exception.message(e)}}
   end
+
+  # Applies Emily.Bumblebee.FastKernels rewrites to the Bumblebee model
+  # when the :emily profile is selected. The rewrite swaps RMSNorm /
+  # LayerNorm / RoPE / SDPA Axon layers for `Emily.Fast.*` calls that
+  # dispatch to fused `mx::fast::*` kernels under Emily.Backend (and
+  # fall through to composed-defn equivalents on any other backend).
+  defp maybe_apply_fast_kernels(model_info, %RuntimeProfile{name: :emily}) do
+    cond do
+      not Code.ensure_loaded?(Emily.Bumblebee.FastKernels) ->
+        {:error,
+         {:emily_fast_kernels_unavailable,
+          "Emily.Bumblebee.FastKernels not loaded; ensure :emily, :axon, and :bumblebee are all in the dep tree."}}
+
+      true ->
+        {:ok, update_in(model_info.model, &Emily.Bumblebee.FastKernels.apply/1)}
+    end
+  end
+
+  defp maybe_apply_fast_kernels(model_info, _profile), do: {:ok, model_info}
 
   @doc """
   Extracts a vector with the adapted model and routes it through the artifact head.

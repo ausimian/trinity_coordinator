@@ -139,6 +139,9 @@ defmodule TrinityCoordinator.RuntimeProfile do
   # Validation-pass-only profile (Emily 0.4.0). Mirrors the :emlx lane's
   # intent (Apple Silicon, no CUDA, full Qwen runtime, exporter on) but
   # routes through Emily.Backend instead of EMLX.Backend.
+  # Coordinator.load/1 applies Emily.Bumblebee.FastKernels rewrites to
+  # model_info.model when this profile is selected; on any other backend
+  # the rewritten layers fall through their composed-defn fallbacks.
   def resolve(:emily) do
     %__MODULE__{
       name: :emily,
