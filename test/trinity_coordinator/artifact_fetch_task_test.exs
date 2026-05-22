@@ -91,6 +91,43 @@ defmodule Mix.Tasks.Trinity.Artifact.FetchTest do
     end
   end
 
+  # Regression for the fresh-clone onboarding crash uncovered by the
+  # clean-room test on 2026-05-21:
+  #
+  #     ** (ArgumentError) unknown registry: Req.Finch
+  #
+  # The task wires through `HfHub.Download.hf_hub_download/1`, which uses
+  # Req + Finch under the hood. On a fresh clone the
+  # `mix trinity.artifact.fetch` invocation never started the application
+  # supervision tree, so Finch's registry was never spun up. Every other
+  # `mix trinity.*` task in `lib/mix/tasks/` calls
+  # `Mix.Task.run("app.start")` first; this task was the outlier.
+  #
+  # We do not hit the network here: the injected downloader returns a
+  # valid cached file. We only assert that `:hf_hub` is started after the
+  # task returns, which is the observable signal that `app.start` ran.
+  test "starts the application supervision tree before invoking the downloader",
+       %{tmp: tmp} do
+    Application.stop(:trinity_coordinator)
+    Application.stop(:hf_hub)
+
+    refute :hf_hub in Enum.map(Application.started_applications(), &elem(&1, 0))
+
+    pin_path = write_synthetic_pin!(tmp, ["manifest.json"])
+    cache = Path.join(tmp, "cache")
+    File.mkdir_p!(cache)
+    File.write!(Path.join(cache, "manifest.json"), "manifest-bytes")
+
+    downloader = fn args -> {:ok, Path.join(cache, args[:filename])} end
+    Process.put(:trinity_artifact_fetch_downloader, downloader)
+    on_exit(fn -> Process.delete(:trinity_artifact_fetch_downloader) end)
+
+    assert :ok = Fetch.run(["--pin", pin_path, "--dest", Path.join(tmp, "dest")])
+
+    assert :hf_hub in Enum.map(Application.started_applications(), &elem(&1, 0)),
+           "trinity.artifact.fetch must start the application tree so Finch/Req are available"
+  end
+
   defp write_synthetic_pin!(tmp, file_paths, opts \\ []) do
     pin_path = Path.join(tmp, "pin.json")
 

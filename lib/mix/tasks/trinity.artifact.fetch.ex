@@ -64,6 +64,15 @@ defmodule Mix.Tasks.Trinity.Artifact.Fetch do
       print_help()
       :ok
     else
+      # Bring up the application supervision tree before any HTTP code
+      # path inside HfHub / Req / Finch runs. Without this the fresh-clone
+      # invocation of `mix trinity.artifact.fetch` blows up with
+      # `(ArgumentError) unknown registry: Req.Finch` because Finch is
+      # never started. We use `Application.ensure_all_started/1` (not the
+      # more common `Mix.Task.run("app.start")`) so the task is also
+      # robust to being re-invoked inside an already-running BEAM where
+      # `app.start` is a no-op.
+      {:ok, _} = Application.ensure_all_started(:trinity_coordinator)
       do_fetch(opts)
     end
   end
