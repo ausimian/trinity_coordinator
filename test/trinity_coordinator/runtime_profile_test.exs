@@ -67,6 +67,37 @@ defmodule TrinityCoordinator.RuntimeProfileTest do
              """
     end
 
+    test ":emily_fast mirrors :emily but is a distinct name for the FastKernels lane" do
+      p = RuntimeProfile.resolve(:emily_fast)
+
+      # Same Apple-shaped flags and backend tuple as :emily — the only
+      # surface differences are the profile name (Coordinator.load/1
+      # keys the FastKernels rewrite off the name) and the notes string.
+      assert p.name == :emily_fast
+      assert p.nx_backend == {Emily.Backend, []}
+      assert p.require_cuda? == false
+      assert p.qwen_runtime? == true
+      assert p.export_svd? == true
+      assert p.large_svd? == false
+      assert p.artifact_runtime? == true
+      assert p.default_slm_profile == :qwen_coordinator
+      assert match?([_ | _], p.notes)
+      assert Enum.any?(p.notes, &String.contains?(&1, "FastKernels"))
+    end
+
+    test ":emily_fast inherits the same Emily margin floors as :emily" do
+      p = RuntimeProfile.resolve(:emily_fast)
+
+      assert RuntimeProfile.default_margins(p) == %{agent: 0.33, role: 0.82},
+             """
+             :emily_fast must inherit :emily's empirical margin floors. The
+             escalate_to_human role margin is bitwise identical (1.0291)
+             between bare :emily and :emily_fast on the prompt eval; tightening
+             the floor for the fast lane would just re-introduce the same
+             near-miss the floor exists to absorb.
+             """
+    end
+
     test ":emlx maps to EMLX.Backend with device: :gpu and does not require CUDA" do
       p = RuntimeProfile.resolve(:emlx)
       assert p.name == :emlx
@@ -176,6 +207,24 @@ defmodule TrinityCoordinator.RuntimeProfileTest do
         assert String.contains?(msg, "Emily")
       end
     end
+
+    test ":emily_fast profile raises the same Emily-specific error path as :emily" do
+      # Same backend tuple → same missing-backend behaviour. CUDA hosts hit
+      # this branch; Apple Silicon hosts with Emily loaded skip the raise.
+      raised =
+        try do
+          RuntimeProfile.put_default_backend!(:emily_fast)
+        rescue
+          e -> e
+        else
+          _ -> nil
+        end
+
+      if raised do
+        msg = Exception.message(raised)
+        assert String.contains?(msg, "Emily")
+      end
+    end
   end
 
   describe "accepts_backend_label?/2" do
@@ -200,6 +249,13 @@ defmodule TrinityCoordinator.RuntimeProfileTest do
 
     test ":emily accepts Emily.Backend labels (Phase 2 generic-label round-trip)" do
       profile = RuntimeProfile.resolve(:emily)
+      assert RuntimeProfile.accepts_backend_label?(profile, "Emily.Backend")
+      refute RuntimeProfile.accepts_backend_label?(profile, "EXLA.Backend<cuda:0>")
+      refute RuntimeProfile.accepts_backend_label?(profile, "EMLX.Backend")
+    end
+
+    test ":emily_fast accepts Emily.Backend labels (same backend module as :emily)" do
+      profile = RuntimeProfile.resolve(:emily_fast)
       assert RuntimeProfile.accepts_backend_label?(profile, "Emily.Backend")
       refute RuntimeProfile.accepts_backend_label?(profile, "EXLA.Backend<cuda:0>")
       refute RuntimeProfile.accepts_backend_label?(profile, "EMLX.Backend")

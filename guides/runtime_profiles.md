@@ -154,6 +154,61 @@ against the CUDA snapshot. `route_hash` will drift on every case for
 both lanes — that's expected on a different kernel stack and is exactly
 what the per-profile snapshot fixture lane below is designed for.
 
+### `:emily_fast`
+
+Same Apple Silicon / `Emily.Backend` lane as `:emily`, plus
+`Emily.Bumblebee.FastKernels.apply/1` applied to the Bumblebee model
+inside `Coordinator.load/1`. The rewrite swaps RMSNorm / LayerNorm /
+RoPE / SDPA Axon layers for `Emily.Fast.*` helpers that dispatch to
+fused `mx::fast::*` kernels under `Emily.Backend`. On any other backend
+the rewritten helpers fall through to composed-defn equivalents that
+are mathematically equivalent, so the rewritten model remains
+evaluable on `Nx.BinaryBackend` / EXLA for conformance.
+
+- `nx_backend: {Emily.Backend, []}`
+- `require_cuda?: false`
+- `default_slm_profile: :qwen_coordinator`
+- `default_min_agent_margin: 0.33`
+- `default_min_role_margin: 0.82`
+
+Same optional-dep convention as `:emily` — add
+`{:emily, "~> 0.4", only: [:dev, :test]}` to your **parent**
+application's `mix.exs`. Then:
+
+```bash
+mix run examples/qwen_router_prompt_eval.exs \
+  --runtime-profile emily_fast \
+  --artifact-dir tmp/emily_adapted_qwen3_0_6b_layer26 \
+  --determinism-runs 2
+```
+
+The exported artifact is identical to the one produced under `:emily`
+(the FastKernels rewrites are a forward-pass concern, not an export
+concern); you can reuse the same `tmp/emily_adapted_qwen3_0_6b_layer26`
+bundle.
+
+#### `:emily` vs `:emily_fast` at a glance
+
+| Axis | `:emily` (bare) | `:emily_fast` |
+|---|---|---|
+| Backend module | `Emily.Backend` | `Emily.Backend` |
+| Bumblebee model | as-loaded | rewritten via `Emily.Bumblebee.FastKernels.apply/1` |
+| Decision-stable agreement with CUDA snapshot (37/37) | ✓ | ✓ |
+| Margin floors | `0.33` / `0.82` | `0.33` / `0.82` (inherited) |
+| In-process determinism | ✓ | ✓ |
+| Wall-clock on prompt eval (single forward pass) | baseline | ~15% faster |
+| Wall-clock on generative workloads | baseline | larger relative win expected (attention / RoPE / RMSNorm dominate per-token cost) |
+
+The `escalate_to_human` role margin is bitwise identical between the
+two lanes (`1.0291`) — the rewrite moves logits on the other 25/37 cases
+but happens to leave that case's role logits untouched. The shared
+margin-floor override absorbs it cleanly in both lanes.
+
+Pick `:emily_fast` when you're paying for forward-pass throughput and
+want the same decision contract as bare `:emily`. Stay on bare
+`:emily` when you want the no-rewrite reference baseline (e.g. to
+isolate fused-vs-composed numerical differences from other factors).
+
 ### `:cpu_binary`
 
 Pure-Elixir CPU fallback. Useful for unit tests and for quick
@@ -230,6 +285,7 @@ that pre-date the profile system; they remain supported.
 | NVIDIA GPU + CUDA-12 toolchain + Linux | `:cuda_exla` (default) |
 | Apple Silicon (M-series), production-shaped | `:emlx` + add `{:emlx, "~> 0.3"}` to your deps |
 | Apple Silicon (M-series), research / Emily MLX | `:emily` + add `{:emily, "~> 0.4"}` to your deps |
+| Apple Silicon (M-series), Emily MLX with fused kernels | `:emily_fast` + add `{:emily, "~> 0.4"}` to your deps |
 | No GPU; want to run unit tests / quick sanity checks | `:cpu_binary` |
 | Some other backend (e.g. Torchx, custom NIF) | `{:custom, BackendMod, opts}` |
 

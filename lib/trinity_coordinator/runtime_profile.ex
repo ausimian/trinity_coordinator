@@ -15,6 +15,12 @@ defmodule TrinityCoordinator.RuntimeProfile do
     * `:mock_tiny` — synthetic tiny coordinator with no Qwen load (Phase 5).
     * `:emlx` — Apple Silicon path. Descriptive only unless the EMLX backend
       module is actually loaded by the host application.
+    * `:emily` — Apple Silicon (Emily MLX) bare-Nx lane. Routes through
+      `Emily.Backend` with the empirical Emily margin floors seeded.
+    * `:emily_fast` — same as `:emily` plus `Emily.Bumblebee.FastKernels`
+      Axon-graph rewrites applied to the loaded Bumblebee model
+      (`Coordinator.load/1` is the application point). Dispatches RMSNorm /
+      LayerNorm / RoPE / SDPA layers to fused `mx::fast::*` kernels.
 
   Custom profiles can be passed through directly:
 
@@ -181,6 +187,49 @@ defmodule TrinityCoordinator.RuntimeProfile do
     |> override_default_margins(agent: 0.33, role: 0.82)
   end
 
+  # Apple Silicon profile identical to :emily plus
+  # `Emily.Bumblebee.FastKernels.apply/1` applied to the loaded
+  # Bumblebee model at `Coordinator.load/1` time. The rewrite swaps
+  # RMSNorm / LayerNorm / RoPE / SDPA Axon layers for `Emily.Fast.*`
+  # helpers that dispatch to fused `mx::fast::*` kernels under
+  # Emily.Backend (and fall through to composed-defn equivalents on
+  # any other backend — the rewritten model stays evaluable on
+  # Nx.BinaryBackend / EXLA for conformance).
+  #
+  # Decision-stable behaviour matches :emily exactly: 37/37 agreement
+  # with the CUDA snapshot on every case, the escalate_to_human role
+  # margin is bitwise identical to bare :emily (1.0291), so the same
+  # empirical 0.33 / 0.82 floors apply. Wall-clock on the prompt-eval
+  # workload is ~15% faster than bare :emily, with the larger relative
+  # gain expected on generative workloads where attention / RoPE /
+  # RMSNorm dominate the per-token cost.
+  #
+  # Same optional-dep convention as :emily — add `{:emily, "~> 0.4",
+  # only: [:dev, :test]}` to your parent app's mix.exs.
+  # `Emily.Bumblebee.FastKernels` ships inside the Emily package and
+  # only defines when both :axon and :bumblebee are loaded; trinity
+  # already brings those in, so the rewriter is available as soon as
+  # Emily itself is.
+  def resolve(:emily_fast) do
+    %__MODULE__{
+      name: :emily_fast,
+      nx_backend: {Emily.Backend, []},
+      require_cuda?: false,
+      qwen_runtime?: true,
+      export_svd?: true,
+      large_svd?: false,
+      artifact_runtime?: true,
+      default_slm_profile: :qwen_coordinator,
+      notes: [
+        "Apple Silicon (Emily MLX) profile with Emily.Bumblebee.FastKernels ",
+        "Axon-graph rewrites applied at Coordinator.load/1 time. ",
+        "Requires the optional {:emily, \"~> 0.4\"} dependency. ",
+        "See guides/runtime_profiles.md for setup."
+      ]
+    }
+    |> override_default_margins(agent: 0.33, role: 0.82)
+  end
+
   def resolve({:custom, backend, opts}) when is_atom(backend) and is_list(opts) do
     %__MODULE__{
       name: :custom,
@@ -192,7 +241,7 @@ defmodule TrinityCoordinator.RuntimeProfile do
   def resolve(other) do
     raise ArgumentError,
           "unknown runtime profile #{inspect(other)}; " <>
-            "valid built-ins: :cuda_exla, :host_exla, :binary, :mock_tiny, :emlx, :emily; " <>
+            "valid built-ins: :cuda_exla, :host_exla, :binary, :mock_tiny, :emlx, :emily, :emily_fast; " <>
             "or pass a %TrinityCoordinator.RuntimeProfile{} struct or {:custom, backend, opts}"
   end
 
@@ -200,7 +249,8 @@ defmodule TrinityCoordinator.RuntimeProfile do
   Returns the list of built-in profile names.
   """
   @spec builtin_names() :: [atom()]
-  def builtin_names, do: [:cuda_exla, :host_exla, :binary, :mock_tiny, :emlx, :emily]
+  def builtin_names,
+    do: [:cuda_exla, :host_exla, :binary, :mock_tiny, :emlx, :emily, :emily_fast]
 
   @doc """
   Sets the current process default Nx backend to the profile's backend.

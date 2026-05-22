@@ -30,6 +30,11 @@ defmodule TrinityCoordinator.RuntimeProfileMarginsTest do
                %{agent: 0.24, role: 1.06}
     end
 
+    test ":emily_fast inherits :emily's Emily-empirical margin floors" do
+      profile = RuntimeProfile.resolve(:emily_fast)
+      assert RuntimeProfile.default_margins(profile) == %{agent: 0.33, role: 0.82}
+    end
+
     test ":custom inherits the CUDA defaults unless overridden via override_default_margins/2" do
       profile = RuntimeProfile.resolve({:custom, Nx.BinaryBackend, []})
       assert RuntimeProfile.default_margins(profile) == %{agent: 0.24, role: 1.06}

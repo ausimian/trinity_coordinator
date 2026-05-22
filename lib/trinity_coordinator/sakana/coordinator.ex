@@ -83,6 +83,7 @@ defmodule TrinityCoordinator.Sakana.Coordinator do
       |> Map.update!(:load_options, fn lo -> Keyword.put(lo, :backend, backend) end)
 
     with {:ok, {model_info, tokenizer}} <- SLMProfile.load_profile(slm_profile),
+         {:ok, model_info} <- maybe_apply_fast_kernels(model_info, profile),
          {:ok, manifest} <- Artifact.load_manifest(opts[:artifact_dir]),
          head_weights <- Artifact.load_router_head!(opts[:artifact_dir], manifest: manifest),
          {:ok, head_state} <-
@@ -112,6 +113,45 @@ defmodule TrinityCoordinator.Sakana.Coordinator do
   rescue
     e ->
       {:error, {:coordinator_load_error, Exception.message(e)}}
+  end
+
+  @doc false
+  # Applies Emily.Bumblebee.FastKernels rewrites to `model_info.model`
+  # when the :emily_fast profile is selected. Other profiles return the
+  # `model_info` unchanged. Reference to `Emily.Bumblebee.FastKernels`
+  # is dynamic (apply/3) so this module compiles cleanly without the
+  # optional :emily dep; resolution and arity are checked at runtime.
+  #
+  # Public with @doc false (rather than defp) so each branch can be
+  # exercised independently from tests without staging a full Bumblebee
+  # model_info — the rewriter contract is "takes an Axon graph, returns
+  # one," so the test can pass any map with a `:model` key and assert
+  # on the routing.
+  @spec maybe_apply_fast_kernels(map(), RuntimeProfile.t()) ::
+          {:ok, map()} | {:error, {:emily_fast_kernels_unavailable, String.t()}}
+  def maybe_apply_fast_kernels(model_info, %RuntimeProfile{name: :emily_fast}) do
+    fast_kernels = Module.concat([Emily, Bumblebee, FastKernels])
+
+    cond do
+      not Code.ensure_loaded?(fast_kernels) ->
+        {:error, {:emily_fast_kernels_unavailable, fast_kernels_help_message()}}
+
+      not function_exported?(fast_kernels, :apply, 1) ->
+        {:error, {:emily_fast_kernels_unavailable, fast_kernels_help_message()}}
+
+      true ->
+        {:ok, update_in(model_info.model, &apply(fast_kernels, :apply, [&1]))}
+    end
+  end
+
+  def maybe_apply_fast_kernels(model_info, _profile), do: {:ok, model_info}
+
+  defp fast_kernels_help_message do
+    "Runtime profile :emily_fast requires Emily.Bumblebee.FastKernels, " <>
+      "which is part of the optional :emily package. Add " <>
+      "{:emily, \"~> 0.4\", only: [:dev, :test]} to your parent " <>
+      "application's mix.exs and run mix deps.get. See " <>
+      "guides/runtime_profiles.md."
   end
 
   @doc """
