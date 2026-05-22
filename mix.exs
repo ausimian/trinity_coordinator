@@ -118,7 +118,7 @@ defmodule TrinityCoordinator.MixProject do
       DependencySources.dep(:agent_session_manager, __DIR__),
       DependencySources.dep(:gemini_cli_sdk, __DIR__),
       {:req, "~> 0.5"},
-      {:hf_hub, "~> 0.2"},
+      {:hf_hub, "~> 0.3"},
       {:credo, "~> 1.7", only: :dev, runtime: false},
       {:dialyxir, "~> 1.4", only: :dev, runtime: false},
       {:ex_doc, "~> 0.38", only: :dev, runtime: false}

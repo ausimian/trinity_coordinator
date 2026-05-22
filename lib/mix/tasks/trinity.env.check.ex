@@ -76,11 +76,18 @@ defmodule Mix.Tasks.Trinity.Env.Check do
   defp silent?, do: Mix.shell() == Mix.Shell.Quiet
 
   # `argv` is reserved for tests/dry runs that want to inject an explicit
-  # `XLA_TARGET` value. In normal operation the value is read once from
-  # `System.get_env/1` at task entry, since reading the *build-time* env that
-  # has already been frozen into the dep tree is the only sensible read.
+  # `XLA_TARGET` value. In normal operation the value is read via
+  # `XlaTargetValidator.raw_xla_target/0`, which lives under `build_support/`
+  # and is the single OS-env boundary the project allows. Per AGENTS.md, no
+  # `lib/**` code may call `System.get_env/1` directly; the build_support
+  # module is the explicit, named exception loaded eagerly from `mix.exs`.
+  #
+  # Dialyzer cannot follow the `Code.require_file` that `mix.exs` performs
+  # to make `XlaTargetValidator` available at runtime, so we explicitly
+  # allow-list the call below.
+  @dialyzer {:no_unknown, [xla_target_from_env: 1]}
   defp xla_target_from_env(_argv) do
-    case System.get_env("XLA_TARGET") do
+    case XlaTargetValidator.raw_xla_target() do
       nil -> nil
       "" -> nil
       v -> v

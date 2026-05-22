@@ -85,51 +85,95 @@ This is for forks and for the maintainer cutting a new bundle revision.
 1. Create an account at <https://huggingface.co/>.
 2. Get a write-scoped access token at
    <https://huggingface.co/settings/tokens>.
-3. Set the token in your environment **for the upload command only**:
-
-```bash
-HF_TOKEN=hf_xxx iex -S mix
-```
 
 The `trinity_coordinator` library does **not** read `HF_TOKEN` from the
-environment in `lib/**` (per AGENTS.md). Tokens are read only during
-the explicit upload session.
+environment in `lib/**` (per AGENTS.md). Tokens are read only during the
+explicit upload session via `System.fetch_env!/1` in `iex`.
 
-### 2.2 Create the dataset repository
+### 2.2 Start `iex` with your HF credentials
 
-From `iex -S mix`:
+Pick whichever form fits your workstation:
 
-```elixir
-{:ok, %{url: url}} =
-  HfHub.Repo.create(
-    "your-org/trinity-coordinator-adapted-qwen3-0.6b",
-    repo_type: :dataset,
-    private: false,
-    token: System.get_env("HF_TOKEN")
-  )
-
-IO.puts("Dataset repo created: #{url}")
+```bash
+# Inline env var form (works on any machine):
+HF_TOKEN=hf_xxx XLA_TARGET=cuda12 iex -S mix
 ```
 
-Pick a repo name that signals (a) which underlying base model, (b) that
-this is the adapted variant, (c) your ownership. The maintainer's
-canonical name is `nshkrdotcom/trinity-coordinator-adapted-qwen3-0.6b`.
+```bash
+# Maintainer-private wrapper form (loads HF_TOKEN from
+# ~/p/g/n/dotfiles_private/scripts/with_bash_secrets):
+XLA_TARGET=cuda12 ~/scripts/with_bash_secrets iex -S mix
+```
 
-### 2.3 Upload the bundle
+`XLA_TARGET=cuda12` is required because the project's preflight rejects
+unknown XLA targets (notably `cuda13`).
+
+### 2.3 End-to-end publish: create, upload, verify, tag
+
+The full publish flow fits in one iex session. Bind the artifact path,
+repo id, and token once, then run create → upload → verify → tag. The
+verification step uses the public HF tree API to confirm the commit
+actually populated the repo before the tag locks it in — this guards
+against silent regressions in the commit payload format.
 
 ```elixir
 artifact_dir = "priv/sakana_trinity/adapted_qwen3_0_6b_layer26"
 repo_id      = "your-org/trinity-coordinator-adapted-qwen3-0.6b"
-token        = System.get_env("HF_TOKEN")
+token        = System.fetch_env!("HF_TOKEN")
 
-{:ok, _info} =
+# 1. Create the dataset repo (idempotent with `exist_ok: true`).
+{:ok, %{url: url}} =
+  HfHub.Repo.create(repo_id,
+    repo_type: :dataset,
+    private: false,
+    exist_ok: true,
+    token: token
+  )
+
+IO.puts("Dataset repo: #{url}")
+
+# 2. Upload the bundle with explicit large-LFS settings.
+#
+#    `max_workers: 1`         — avoids concurrent multipart uploads
+#                               contending for memory/network on the two
+#                               ~297 MB tensors in this bundle.
+#    `lfs_upload_timeout`     — 60 minutes per LFS HTTP request.
+#    `lfs_task_timeout`       — 65 minutes per LFS worker, leaving a
+#                               small margin beyond the HTTP timeout.
+{:ok, info} =
   HfHub.Commit.upload_folder(
     artifact_dir,
     repo_id,
     token: token,
     repo_type: :dataset,
     commit_message: "v1.0.0: initial adapted-artifact bundle",
-    ignore_patterns: ["*.log.jsonl", "*.tmp", ".DS_Store"]
+    ignore_patterns: ["*.log.jsonl", "*.tmp", ".DS_Store"],
+    max_workers: 1,
+    lfs_upload_timeout: 60 * 60 * 1000,
+    lfs_task_timeout: 65 * 60 * 1000
+  )
+
+IO.inspect(info, label: "commit")
+
+# 3. Verify the commit actually populated the tree before tagging.
+#    Expect at least the manifest, router head, and 9 checkpoint files;
+#    HF may also include `.gitattributes` and folder entries.
+{:ok, %Req.Response{status: 200, body: tree}} =
+  Req.get(
+    "https://huggingface.co/api/datasets/#{repo_id}/tree/main",
+    params: [recursive: true]
+  )
+
+tree_count = length(tree)
+IO.puts("Tree entry count on main: #{tree_count}")
+true = tree_count >= 11
+
+# 4. Tag the verified commit.
+{:ok, _} =
+  HfHub.Git.create_tag(repo_id, "v1.0.0",
+    repo_type: :dataset,
+    message: "Initial public release of the adapted Qwen3 router bundle",
+    token: token
   )
 ```
 
@@ -137,20 +181,12 @@ LFS upload is automatic for files ≥ 10 MB — the two 297 MB tensors
 (`0001_embedder…` and `0009_language_modeling_head…`) ride LFS; the
 nine smaller files (4–6 MB each) ride a normal commit.
 
-### 2.4 Tag the revision
+If step 3 returns fewer entries than expected, **do not tag**. Investigate
+first (most likely cause: an `hf_hub_ex` regression in the commit ndjson
+wire shape — see `~/jb/docs/20260521/hf_hub/v2_critical_review_remaining_gaps.md`
+§ V3).
 
-```elixir
-{:ok, _} =
-  HfHub.Git.create_tag(
-    repo_id,
-    "v1.0.0",
-    repo_type: :dataset,
-    message: "Initial public release of the adapted Qwen3 router bundle",
-    token: token
-  )
-```
-
-### 2.5 Regenerate the pin
+### 2.4 Regenerate the pin
 
 After publishing, regenerate `artifact_pin.json` so the fetch task
 points at the new revision:
@@ -167,25 +203,30 @@ XLA_TARGET=cuda12 mix run build_support/build_artifact_pin.exs \
 Commit the updated pin file to your fork. Downstream users get the new
 bundle on next `mix trinity.artifact.fetch`.
 
-### 2.6 Smoke check after publishing
+### 2.5 Smoke check after publishing
 
-From a throwaway scratch project:
+From the same `iex -S mix` session, or from any throwaway project that
+has `:hf_hub` and `:jason` as dependencies, verify the public tag can
+resolve `manifest.json`:
 
 ```elixir
+repo_id = "your-org/trinity-coordinator-adapted-qwen3-0.6b"
+
 {:ok, path} =
   HfHub.Download.hf_hub_download(
-    repo_id: "your-org/trinity-coordinator-adapted-qwen3-0.6b",
+    repo_id: repo_id,
     filename: "manifest.json",
     repo_type: :dataset,
     revision: "v1.0.0"
   )
 
 {:ok, json} = path |> File.read!() |> Jason.decode()
-assert json["router_head_shape"] == [10, 1024]
+true = json["router_head_shape"] == [10, 1024]
 ```
 
-If that fetches and decodes cleanly, the rest of the bundle is
-addressable by the same path.
+Use `true = ...` instead of `assert ...` so the snippet works directly in
+plain `iex` without importing `ExUnit.Assertions`. If the fetch and shape
+check succeed, the rest of the bundle is addressable by the same path.
 
 ## 3. Plan B — GitHub Release fallback
 
