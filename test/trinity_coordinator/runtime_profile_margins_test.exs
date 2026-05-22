@@ -20,6 +20,16 @@ defmodule TrinityCoordinator.RuntimeProfileMarginsTest do
       end
     end
 
+    test ":emily ships Emily-empirical margin floors NOT the canonical CUDA defaults" do
+      profile = RuntimeProfile.resolve(:emily)
+      assert RuntimeProfile.default_margins(profile) == %{agent: 0.33, role: 0.82}
+
+      # Sanity: the canonical defaults are still 0.24 / 1.06 — :emily's
+      # override does not bleed into the other built-ins.
+      assert RuntimeProfile.default_margins(RuntimeProfile.resolve(:cuda_exla)) ==
+               %{agent: 0.24, role: 1.06}
+    end
+
     test ":custom inherits the CUDA defaults unless overridden via override_default_margins/2" do
       profile = RuntimeProfile.resolve({:custom, Nx.BinaryBackend, []})
       assert RuntimeProfile.default_margins(profile) == %{agent: 0.24, role: 1.06}

@@ -148,6 +148,39 @@ defmodule TrinityCoordinator.RuntimeProfile do
     }
   end
 
+  # Apple Silicon research/validation lane backed by the Emily MLX
+  # backend. Mirrors :emlx's Apple-shaped flags but routes to
+  # Emily.Backend and seeds the per-profile margin floors from
+  # ausimian's empirical 2026-05-21 validation pass on Qwen3-0.6B + the
+  # thin-SVD fix in Nx PR #1753: agent worst 0.417 (two_assistant_turns),
+  # role worst 1.029 (escalate_to_human) — 80% floors are 0.33 / 0.82.
+  # Without this override, every clean Emily run would mark the
+  # escalate_to_human case as a near-miss against the canonical CUDA
+  # role floor of 1.06.
+  #
+  # Emily is an OPTIONAL dependency for hosts that want this lane;
+  # add `{:emily, "~> 0.4", only: [:dev, :test]}` to your parent app's
+  # mix.exs (do not commit it to trinity_coordinator's own mix.exs).
+  # See guides/runtime_profiles.md for the full Apple-Silicon recipe.
+  def resolve(:emily) do
+    %__MODULE__{
+      name: :emily,
+      nx_backend: {Emily.Backend, []},
+      require_cuda?: false,
+      qwen_runtime?: true,
+      export_svd?: true,
+      large_svd?: false,
+      artifact_runtime?: true,
+      default_slm_profile: :qwen_coordinator,
+      notes: [
+        "Apple Silicon (Emily MLX) research/validation profile. ",
+        "Requires the optional {:emily, \"~> 0.4\"} dependency. ",
+        "See guides/runtime_profiles.md for setup."
+      ]
+    }
+    |> override_default_margins(agent: 0.33, role: 0.82)
+  end
+
   def resolve({:custom, backend, opts}) when is_atom(backend) and is_list(opts) do
     %__MODULE__{
       name: :custom,
@@ -159,7 +192,7 @@ defmodule TrinityCoordinator.RuntimeProfile do
   def resolve(other) do
     raise ArgumentError,
           "unknown runtime profile #{inspect(other)}; " <>
-            "valid built-ins: :cuda_exla, :host_exla, :binary, :mock_tiny, :emlx; " <>
+            "valid built-ins: :cuda_exla, :host_exla, :binary, :mock_tiny, :emlx, :emily; " <>
             "or pass a %TrinityCoordinator.RuntimeProfile{} struct or {:custom, backend, opts}"
   end
 
@@ -167,7 +200,7 @@ defmodule TrinityCoordinator.RuntimeProfile do
   Returns the list of built-in profile names.
   """
   @spec builtin_names() :: [atom()]
-  def builtin_names, do: [:cuda_exla, :host_exla, :binary, :mock_tiny, :emlx]
+  def builtin_names, do: [:cuda_exla, :host_exla, :binary, :mock_tiny, :emlx, :emily]
 
   @doc """
   Sets the current process default Nx backend to the profile's backend.

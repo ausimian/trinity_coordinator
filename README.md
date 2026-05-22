@@ -522,7 +522,7 @@ The next most useful commands are:
 | `mix trinity.parity.check --python-report ... --elixir-report ...` | First-class wrapper around the Python parity comparator with structured JSON summary | None |
 
 All route/demo commands now accept `--runtime-profile NAME` (`:cuda_exla`
-default; `:host_exla`, `:binary`, `:mock_tiny`, `:emlx` for non-canonical lanes).
+default; `:host_exla`, `:binary`, `:mock_tiny`, `:emlx`, `:emily` for non-canonical lanes).
 The default behavior is unchanged from prior releases.
 
 The orchestrator additionally accepts five enforceable budgets

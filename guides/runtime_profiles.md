@@ -82,6 +82,78 @@ mix run examples/qwen_router_prompt_eval.exs --runtime-profile emlx \
   bf16 natively (`{:bf, 16}` ↔ MLX `bfloat16`). No quantisation or
   type cast required.
 
+### `:emily`
+
+Apple Silicon (MLX-backed) **research/validation** lane via the
+[Emily](https://hex.pm/packages/emily) backend. Same Apple-shaped flags
+as `:emlx` but routes to `Emily.Backend` and ships
+`ausimian`'s empirically-derived per-profile margin floors
+(`agent: 0.33`, `role: 0.82`) so a clean Emily run does **not** mark
+the `escalate_to_human` case as a near-miss against the canonical CUDA
+role floor of `1.06`.
+
+- `nx_backend: {Emily.Backend, []}`
+- `require_cuda?: false`
+- `default_slm_profile: :qwen_coordinator`
+- `default_min_agent_margin: 0.33`
+- `default_min_role_margin: 0.82`
+
+Emily is an optional dependency. To use this profile, add it to your
+**parent** application's `mix.exs` — do NOT add it to
+`trinity_coordinator`'s own `mix.exs`:
+
+```elixir
+{:emily, "~> 0.4", only: [:dev, :test]}
+```
+
+Then:
+
+```bash
+mix deps.get
+
+XLA_TARGET=cuda12 mix trinity.sakana.export_adapted \
+  --force \
+  --svd-compute-type f32 \
+  --runtime-profile emily \
+  --out tmp/emily_adapted_qwen3_0_6b_layer26
+
+mix run examples/qwen_router_prompt_eval.exs \
+  --runtime-profile emily \
+  --artifact-dir tmp/emily_adapted_qwen3_0_6b_layer26 \
+  --determinism-runs 2
+```
+
+Note: the `--min-agent-margin` / `--min-role-margin` flags are no
+longer required — the `:emily` profile seeds its own floors via
+`RuntimeProfile.default_margins/1` (see "Per-Profile Snapshot Fixtures
+And Margin Floors" below). Pass them explicitly only if you want to
+override the seeded values for a one-off run.
+
+The canonical Apple lane for production-shaped workloads remains
+`:emlx`; `:emily` is the research/validation lane. They are both
+Apple-shaped and they both pass the prompt eval — pick `:emily` when
+you want Paulo Valente's thin-SVD path under MLX, and `:emlx` when you
+want the EMLX runtime that EMLXAxon was built against.
+
+#### Why two Apple profiles?
+
+`:emlx` and `:emily` are both Apple-Silicon (MLX-family) but differ at
+the Nx-backend layer:
+
+- `:emlx` → `EMLX.Backend, device: :gpu`. Canonical Apple lane;
+  EMLXAxon has independently validated Qwen3-0.6B through it.
+- `:emily` → `Emily.Backend`. Research/validation backend; ships the
+  `Gram`-matrix thin-SVD path that adapted on top of Nx PR #1753
+  ("better memory footprint for thin SVD") and was the lane on which
+  the Apple-side end-to-end run was first proven (ausimian, 2026-05-21,
+  37/37 decisions match CUDA; one role-margin near-miss absorbed by
+  the per-profile floor seeded above).
+
+Both lanes pass the same prompt-eval suite and are decision-stable
+against the CUDA snapshot. `route_hash` will drift on every case for
+both lanes — that's expected on a different kernel stack and is exactly
+what the per-profile snapshot fixture lane below is designed for.
+
 ### `:cpu_binary`
 
 Pure-Elixir CPU fallback. Useful for unit tests and for quick
@@ -156,7 +228,8 @@ that pre-date the profile system; they remain supported.
 | You have… | Use |
 |---|---|
 | NVIDIA GPU + CUDA-12 toolchain + Linux | `:cuda_exla` (default) |
-| Apple Silicon (M-series) | `:emlx` + add `{:emlx, "~> 0.3"}` to your deps |
+| Apple Silicon (M-series), production-shaped | `:emlx` + add `{:emlx, "~> 0.3"}` to your deps |
+| Apple Silicon (M-series), research / Emily MLX | `:emily` + add `{:emily, "~> 0.4"}` to your deps |
 | No GPU; want to run unit tests / quick sanity checks | `:cpu_binary` |
 | Some other backend (e.g. Torchx, custom NIF) | `{:custom, BackendMod, opts}` |
 
@@ -205,16 +278,26 @@ Margin floor resolution (`--min-agent-margin` / `--min-role-margin`):
 
 ## Validating With Emily (Apple Silicon, MLX, Research)
 
-[Emily](https://hex.pm/packages/emily) is the open-source MLX-backed Nx
-backend used by the Apple-side research validation pass. The canonical
-Apple lane is `:emlx`; `:emily` is intentionally **not** a built-in
-profile today. Apple-side operators who want to validate an export
-against Emily use the `{:custom, Emily.Backend, []}` route instead.
+Emily is a first-class profile — see the [`:emily`](#emily) section
+above for the full recipe. The short version:
 
-To run the prompt eval through Emily without adding a new profile:
+1. Add `{:emily, "~> 0.4", only: [:dev, :test]}` to your **parent**
+   application's `mix.exs`. Do NOT add it to `trinity_coordinator`'s
+   own `mix.exs`.
+2. `mix deps.get`.
+3. Pass `--runtime-profile emily` to `mix trinity.sakana.export_adapted`
+   and `mix run examples/qwen_router_prompt_eval.exs`.
+
+The profile's `default_min_agent_margin` / `default_min_role_margin`
+fields are pre-seeded with the empirical Emily floors (`0.33` / `0.82`)
+from ausimian's 2026-05-21 validation pass, so a clean run does not
+require any explicit `--min-*-margin` overrides.
+
+If you would rather keep your run shaped exactly like the prior
+`{:custom, Emily.Backend, []}` recipe — for example to pin a different
+backend module — the custom-tuple form still works:
 
 ```elixir
-# config/runtime.exs or in your iex session
 profile =
   TrinityCoordinator.RuntimeProfile.resolve({:custom, Emily.Backend, []})
   |> TrinityCoordinator.RuntimeProfile.override_default_margins(
@@ -223,44 +306,33 @@ profile =
      )
 ```
 
-```bash
-# Parent app's mix.exs (do NOT add this to trinity_coordinator's own mix.exs):
-#   {:emily, "~> 0.4", only: [:dev, :test]}
-mix deps.get
-
-mix trinity.sakana.export_adapted \
-  --force \
-  --svd-compute-type f32 \
-  --runtime-profile '{:custom, Emily.Backend, []}' \
-  --out tmp/emily_adapted_qwen3_0_6b_layer26
-
-mix run examples/qwen_router_prompt_eval.exs \
-  --runtime-profile '{:custom, Emily.Backend, []}' \
-  --artifact-dir tmp/emily_adapted_qwen3_0_6b_layer26 \
-  --determinism-runs 2 \
-  --min-agent-margin 0.33 \
-  --min-role-margin 0.82
-```
-
-Per ausimian's validation pass on 2026-05-21:
+### Background — what ausimian's pass measured
 
 - 0/37 drift on the decision-stable fields (`agent_id`, `role_id`,
   `token_count`, `transcript_hash`).
 - 37/37 differ on `route_hash` (6dp logit drift — expected on a
   different kernel stack).
-- The empirical worst margins were `agent: 0.417` (`two_assistant_turns`)
-  and `role: 1.029` (`escalate_to_human`); 80% floors are therefore
-  `0.33` / `0.82`.
+- Empirical worst margins were `agent: 0.417` (`two_assistant_turns`)
+  and `role: 1.029` (`escalate_to_human`); the 80% floors are
+  therefore `0.33` / `0.82`. These are exactly the values the
+  built-in `:emily` profile now ships.
 - Phase 1 (lazy-backend timing sync) makes `decompose_elapsed_ms`
   report real GPU wall time on Emily / EMLX instead of the host-side
   dispatch cost of an unmaterialised future.
 
-To ship Emily as a first-class built-in profile in a future release,
-add a `def resolve(:emily) do ... end` clause that mirrors the `:emlx`
-clause but with `nx_backend: Emily.Backend` and the
-`override_default_margins/2` already applied. Phase 4 of the
-[Emily-validation response checklist](https://github.com/nshkrdotcom/trinity_coordinator)
-documents the rationale for keeping it validation-only for now.
+### Per-profile snapshot fixture for Emily
+
+`route_hash` drifts on every case under Emily because float aggregation
+order differs from CUDA. To pin Emily-stable snapshots, drop a
+`examples/fixtures/runtime_profiles/emily/qwen_router_prompt_eval_logits.json`
+file next to the legacy CUDA fixture; the eval entry point's
+`SnapshotResolver` will pick it up automatically when
+`--runtime-profile emily` is passed without `--snapshot`. See "Per-Profile
+Snapshot Fixtures And Margin Floors" above for the resolution order.
+
+The seed snapshot can be generated by running the eval once with
+`--snapshot-out examples/fixtures/runtime_profiles/emily/qwen_router_prompt_eval_logits.json`
+on Apple Silicon.
 
 ## References
 

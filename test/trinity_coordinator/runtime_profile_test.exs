@@ -35,6 +35,38 @@ defmodule TrinityCoordinator.RuntimeProfileTest do
       assert p.default_slm_profile == :tiny_synthetic
     end
 
+    test ":emily mirrors :emlx (Apple Silicon) but routes to Emily.Backend" do
+      p = RuntimeProfile.resolve(:emily)
+
+      # Same Apple-shaped flags as :emlx — Apple lane, no CUDA, full Qwen
+      # runtime, exporter on, single-shot SVD, artifact runtime. Differences
+      # are limited to backend module and default margins; everything else
+      # is intentionally the same so that anyone porting between the two
+      # lanes sees the same operator-facing surface.
+      assert p.name == :emily
+      assert p.nx_backend == {Emily.Backend, []}
+      assert p.require_cuda? == false
+      assert p.qwen_runtime? == true
+      assert p.export_svd? == true
+      assert p.large_svd? == false
+      assert p.artifact_runtime? == true
+      assert p.default_slm_profile == :qwen_coordinator
+      assert match?([_ | _], p.notes)
+    end
+
+    test ":emily ships ausimian's empirical Emily margin floors (agent 0.33, role 0.82)" do
+      p = RuntimeProfile.resolve(:emily)
+
+      assert RuntimeProfile.default_margins(p) == %{agent: 0.33, role: 0.82},
+             """
+             :emily must seed the empirical 80% margin floors from ausimian's
+             2026-05-21 validation pass: agent worst 0.417 (two_assistant_turns),
+             role worst 1.029 (escalate_to_human) — 80% floors are 0.33 / 0.82.
+             Do NOT inherit the canonical CUDA defaults; that would mark every
+             clean Emily run as a near-miss on escalate_to_human.
+             """
+    end
+
     test ":emlx maps to EMLX.Backend with device: :gpu and does not require CUDA" do
       p = RuntimeProfile.resolve(:emlx)
       assert p.name == :emlx
@@ -126,6 +158,24 @@ defmodule TrinityCoordinator.RuntimeProfileTest do
         assert String.contains?(msg, "EMLX")
       end
     end
+
+    test ":emily profile raises an Emily-specific error when Emily.Backend is not loaded" do
+      # On CUDA hosts Emily.Backend is absent (optional research dep).
+      # Confirm the raise message names the dep.
+      raised =
+        try do
+          RuntimeProfile.put_default_backend!(:emily)
+        rescue
+          e -> e
+        else
+          _ -> nil
+        end
+
+      if raised do
+        msg = Exception.message(raised)
+        assert String.contains?(msg, "Emily")
+      end
+    end
   end
 
   describe "accepts_backend_label?/2" do
@@ -146,6 +196,13 @@ defmodule TrinityCoordinator.RuntimeProfileTest do
       profile = RuntimeProfile.resolve(:emlx)
       assert RuntimeProfile.accepts_backend_label?(profile, "EMLX.Backend")
       refute RuntimeProfile.accepts_backend_label?(profile, "EXLA.Backend<cuda:0>")
+    end
+
+    test ":emily accepts Emily.Backend labels (Phase 2 generic-label round-trip)" do
+      profile = RuntimeProfile.resolve(:emily)
+      assert RuntimeProfile.accepts_backend_label?(profile, "Emily.Backend")
+      refute RuntimeProfile.accepts_backend_label?(profile, "EXLA.Backend<cuda:0>")
+      refute RuntimeProfile.accepts_backend_label?(profile, "EMLX.Backend")
     end
 
     test ":binary accepts Nx.BinaryBackend labels" do
