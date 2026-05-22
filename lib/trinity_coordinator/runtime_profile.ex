@@ -25,6 +25,14 @@ defmodule TrinityCoordinator.RuntimeProfile do
   explicit struct.
   """
 
+  # Phase 5 — per-profile defaults for the prompt-eval suite. CUDA-empirical
+  # 80% floors observed on 2026-05-20 (agent worst = 0.301 on `unicode_emoji`,
+  # role worst = 1.335 on `root_cause`). Every built-in profile keeps the
+  # CUDA defaults so behaviour is bytewise unchanged unless a profile
+  # explicitly overrides via `override_default_margins/2`.
+  @canonical_min_agent_margin 0.24
+  @canonical_min_role_margin 1.06
+
   @enforce_keys [:name, :nx_backend]
   defstruct [
     :name,
@@ -35,6 +43,8 @@ defmodule TrinityCoordinator.RuntimeProfile do
     large_svd?: false,
     artifact_runtime?: true,
     default_slm_profile: :qwen_coordinator,
+    default_min_agent_margin: @canonical_min_agent_margin,
+    default_min_role_margin: @canonical_min_role_margin,
     notes: [],
     warnings: []
   ]
@@ -50,6 +60,8 @@ defmodule TrinityCoordinator.RuntimeProfile do
           large_svd?: boolean(),
           artifact_runtime?: boolean(),
           default_slm_profile: atom(),
+          default_min_agent_margin: float(),
+          default_min_role_margin: float(),
           notes: [String.t()],
           warnings: [String.t()]
         }
@@ -245,5 +257,42 @@ defmodule TrinityCoordinator.RuntimeProfile do
       |> Enum.join(".")
 
     [label]
+  end
+
+  @doc """
+  Returns this profile's `%{agent: float, role: float}` default margin floors
+  for the prompt-eval suite.
+
+  Every built-in profile inherits the CUDA-empirical defaults
+  (`agent: 0.24`, `role: 1.06`) unless a future profile explicitly overrides
+  them via `override_default_margins/2`. The CLI flags
+  `--min-agent-margin` / `--min-role-margin` of
+  `examples/qwen_router_prompt_eval.exs` still win when supplied.
+  """
+  @spec default_margins(t()) :: %{agent: float(), role: float()}
+  def default_margins(%__MODULE__{
+        default_min_agent_margin: agent,
+        default_min_role_margin: role
+      }) do
+    %{agent: agent, role: role}
+  end
+
+  @doc """
+  Returns a copy of `profile` with one or both default margin floors overridden.
+
+  Accepted keys: `:agent`, `:role`. Unspecified axes are left at the
+  profile's existing default. Useful for caller-side overrides without
+  having to construct a `%RuntimeProfile{}` from scratch, and for
+  ergonomic per-profile seeding (e.g. an eventual `:emily` clause that
+  wants `0.33` / `0.82` rather than the CUDA defaults).
+  """
+  @spec override_default_margins(t(), keyword()) :: t()
+  def override_default_margins(%__MODULE__{} = profile, overrides) when is_list(overrides) do
+    %{
+      profile
+      | default_min_agent_margin:
+          Keyword.get(overrides, :agent, profile.default_min_agent_margin),
+        default_min_role_margin: Keyword.get(overrides, :role, profile.default_min_role_margin)
+    }
   end
 end

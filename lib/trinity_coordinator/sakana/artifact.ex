@@ -5,6 +5,7 @@ defmodule TrinityCoordinator.Sakana.Artifact do
 
   alias Axon.ModelState
   alias TrinityCoordinator.Runtime
+  alias TrinityCoordinator.Runtime.BackendLabel
 
   @manifest_version 1
   @default_output_dir "priv/sakana_trinity/adapted_qwen3_0_6b_layer26"
@@ -531,10 +532,7 @@ defmodule TrinityCoordinator.Sakana.Artifact do
 
   defp maybe_transfer(%Nx.Tensor{} = tensor, false, _backend), do: tensor
 
-  defp backend_from_label("EXLA.Backend<cuda" <> _), do: {EXLA.Backend, client: :cuda}
-  defp backend_from_label("EXLA.Backend<host" <> _), do: {EXLA.Backend, client: :host}
-  defp backend_from_label("Nx.BinaryBackend"), do: Nx.BinaryBackend
-  defp backend_from_label(_), do: Nx.BinaryBackend
+  defp backend_from_label(label), do: BackendLabel.from_label!(label)
 
   defp ensure_manifest_complete!(_manifest, true), do: :ok
 

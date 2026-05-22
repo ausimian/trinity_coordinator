@@ -41,16 +41,29 @@ defmodule TrinityCoordinator.Runtime do
 
   @doc """
   Returns a compact backend label for a tensor.
+
+  For EXLA tensors, the device identifier (`cuda:N` / `host:N`) is encoded
+  in the inspect output and is preserved as a prefix so callers can
+  distinguish EXLA's CUDA and host clients. For every other backend the
+  label is the backend module's dotted name (e.g. `Nx.BinaryBackend`,
+  `EMLX.Backend`, `Emily.Backend`, `{:custom, MyBackend, []}` →
+  `MyBackend`). This keeps the labelling open to new backends without
+  per-backend code edits — see PR #1 review thread.
   """
-  def tensor_backend(%Nx.Tensor{} = tensor) do
+  def tensor_backend(%Nx.Tensor{data: %backend_struct{}} = tensor) do
     inspected = inspect(tensor)
 
     cond do
       String.contains?(inspected, "EXLA.Backend<cuda") -> "EXLA.Backend<cuda:"
       String.contains?(inspected, "EXLA.Backend<host") -> "EXLA.Backend<host:"
       String.contains?(inspected, "EXLA.Backend<") -> "EXLA.Backend"
-      String.contains?(inspected, "Nx.BinaryBackend") -> "Nx.BinaryBackend"
-      true -> "unknown"
+      true -> module_label(backend_struct)
     end
+  end
+
+  defp module_label(module) do
+    module
+    |> Module.split()
+    |> Enum.join(".")
   end
 end

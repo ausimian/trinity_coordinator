@@ -3,7 +3,7 @@ defmodule Examples.QwenRouterPromptEval do
 
   require Logger
 
-  alias TrinityCoordinator.{HITL, RoleInjector, Runtime, Trace}
+  alias TrinityCoordinator.{HITL, RoleInjector, Trace}
   alias TrinityCoordinator.Sakana.{Artifact, Coordinator}
 
   @default_artifact_dir "priv/sakana_trinity/adapted_qwen3_0_6b_layer26"
@@ -21,13 +21,14 @@ defmodule Examples.QwenRouterPromptEval do
 
   @cases_fixture_path Path.join(["examples", "fixtures", "qwen_router_prompt_eval_cases.json"])
 
-  # Phase 11 Option D (margin-floor ratchet):
-  # 80% of the empirical worst observed in qwen_router_prompt_eval_logits.json
-  # on 2026-05-20 (agent worst = 0.301 on `unicode_emoji`, role worst = 1.335
-  # on `root_cause`). Pass `--min-agent-margin 0.0` / `--min-role-margin 0.0`
-  # to disable for one-off debug. See ~/jb/docs/20260520/sakana/04_margin_floor_ratchet.md.
-  @default_min_agent_margin 0.24
-  @default_min_role_margin 1.06
+  # Phase 5 (per-profile margin floors, 2026-05-21):
+  # The canonical CUDA defaults (`0.24` agent, `1.06` role) now live on
+  # `%TrinityCoordinator.RuntimeProfile{}` and are read via
+  # `RuntimeProfile.default_margins/1` below. Pass
+  # `--min-agent-margin 0.0` / `--min-role-margin 0.0` to disable for one-off
+  # debug. See guides/runtime_profiles.md for the per-profile override path
+  # (Phase 11 Option D origin: empirical worst from
+  # qwen_router_prompt_eval_logits.json on 2026-05-20).
 
   defp load_cases! do
     body = File.read!(@cases_fixture_path)
@@ -174,11 +175,7 @@ defmodule Examples.QwenRouterPromptEval do
     show_logits? = Keyword.get(opts, :show_logits, false)
     verbose? = Keyword.get(opts, :verbose, false) or show_logits?
     determinism_runs = max(1, Keyword.get(opts, :determinism_runs, 1))
-    min_agent_margin = Keyword.get(opts, :min_agent_margin, @default_min_agent_margin)
-    min_role_margin = Keyword.get(opts, :min_role_margin, @default_min_role_margin)
-    snapshot_in = Keyword.get(opts, :snapshot)
     snapshot_out = Keyword.get(opts, :snapshot_out)
-    snapshot_expected = if snapshot_in, do: Jason.decode!(File.read!(snapshot_in)), else: nil
 
     HITL.banner("QWEN ROUTER PROMPT EVAL")
 
@@ -186,6 +183,30 @@ defmodule Examples.QwenRouterPromptEval do
       TrinityCoordinator.MixHelpers.runtime_profile_atom!(
         Keyword.get(opts, :runtime_profile, "cuda_exla")
       )
+
+    runtime_profile = TrinityCoordinator.RuntimeProfile.resolve(runtime_profile_name)
+    profile_default_margins = TrinityCoordinator.RuntimeProfile.default_margins(runtime_profile)
+
+    # Per-profile defaults (Phase 5): when the CLI does not pin a margin
+    # explicitly, fall through to the profile's default (today the canonical
+    # CUDA defaults for every built-in; a future :emily profile would seed
+    # its own empirical floors). CLI flags still win when supplied.
+    min_agent_margin = Keyword.get(opts, :min_agent_margin, profile_default_margins.agent)
+    min_role_margin = Keyword.get(opts, :min_role_margin, profile_default_margins.role)
+
+    # Per-profile snapshot fixture (Phase 5): when the CLI does not pin
+    # --snapshot, try `examples/fixtures/runtime_profiles/<profile>/...`
+    # first and fall back to the legacy CUDA fixture path. CLI override
+    # wins unmodified when supplied.
+    explicit_snapshot = Keyword.get(opts, :snapshot)
+
+    snapshot_in =
+      Examples.QwenRouterPromptEval.SnapshotResolver.resolve(
+        runtime_profile_name,
+        explicit_snapshot
+      )
+
+    snapshot_expected = if snapshot_in, do: Jason.decode!(File.read!(snapshot_in)), else: nil
 
     TrinityCoordinator.RuntimeProfile.put_default_backend!(runtime_profile_name)
 

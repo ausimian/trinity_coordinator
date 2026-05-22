@@ -172,6 +172,96 @@ without loading EXLA. For richer per-profile validation, the
 structured report indicating whether the profile's expected backend is
 loadable in this process, whether the artifact path exists, and so on.
 
+## Per-Profile Snapshot Fixtures And Margin Floors
+
+`examples/qwen_router_prompt_eval.exs` supports a per-profile snapshot
+fixture lane and per-profile margin defaults so a non-CUDA backend can
+land its own empirical floors without rewriting or lowering the
+canonical CUDA snapshot.
+
+Resolution order for the `--snapshot` flag (Phase 5):
+
+1. **Explicit `--snapshot path`** — wins unconditionally; existing CI
+   flows pinning the canonical CUDA fixture keep working without
+   reinterpretation.
+2. **`examples/fixtures/runtime_profiles/<profile>/qwen_router_prompt_eval_logits.json`**
+   — picked up automatically when the per-profile file is present.
+3. **`nil`** — no snapshot drift check (the same default behaviour as
+   before Phase 5). To pin against the CUDA snapshot, pass
+   `--snapshot examples/fixtures/qwen_router_prompt_eval_logits.json`
+   explicitly. We deliberately do **not** fall through to the legacy
+   fixture path automatically: that would silently enable a strict
+   6dp logits byte-equivalence check for operators who did not opt in.
+
+Margin floor resolution (`--min-agent-margin` / `--min-role-margin`):
+
+1. **Explicit CLI flag** — wins.
+2. **`RuntimeProfile.default_margins(profile)`** — every built-in
+   profile inherits the canonical CUDA defaults (`agent: 0.24`,
+   `role: 1.06`) unless overridden via
+   `RuntimeProfile.override_default_margins/2` (e.g. for a future
+   `:emily` profile that wants `agent: 0.33`, `role: 0.82`).
+3. **Module-level defaults** (legacy fallback in the eval script).
+
+## Validating With Emily (Apple Silicon, MLX, Research)
+
+[Emily](https://hex.pm/packages/emily) is the open-source MLX-backed Nx
+backend used by the Apple-side research validation pass. The canonical
+Apple lane is `:emlx`; `:emily` is intentionally **not** a built-in
+profile today. Apple-side operators who want to validate an export
+against Emily use the `{:custom, Emily.Backend, []}` route instead.
+
+To run the prompt eval through Emily without adding a new profile:
+
+```elixir
+# config/runtime.exs or in your iex session
+profile =
+  TrinityCoordinator.RuntimeProfile.resolve({:custom, Emily.Backend, []})
+  |> TrinityCoordinator.RuntimeProfile.override_default_margins(
+       agent: 0.33,
+       role: 0.82
+     )
+```
+
+```bash
+# Parent app's mix.exs (do NOT add this to trinity_coordinator's own mix.exs):
+#   {:emily, "~> 0.4", only: [:dev, :test]}
+mix deps.get
+
+mix trinity.sakana.export_adapted \
+  --force \
+  --svd-compute-type f32 \
+  --runtime-profile '{:custom, Emily.Backend, []}' \
+  --out tmp/emily_adapted_qwen3_0_6b_layer26
+
+mix run examples/qwen_router_prompt_eval.exs \
+  --runtime-profile '{:custom, Emily.Backend, []}' \
+  --artifact-dir tmp/emily_adapted_qwen3_0_6b_layer26 \
+  --determinism-runs 2 \
+  --min-agent-margin 0.33 \
+  --min-role-margin 0.82
+```
+
+Per ausimian's validation pass on 2026-05-21:
+
+- 0/37 drift on the decision-stable fields (`agent_id`, `role_id`,
+  `token_count`, `transcript_hash`).
+- 37/37 differ on `route_hash` (6dp logit drift — expected on a
+  different kernel stack).
+- The empirical worst margins were `agent: 0.417` (`two_assistant_turns`)
+  and `role: 1.029` (`escalate_to_human`); 80% floors are therefore
+  `0.33` / `0.82`.
+- Phase 1 (lazy-backend timing sync) makes `decompose_elapsed_ms`
+  report real GPU wall time on Emily / EMLX instead of the host-side
+  dispatch cost of an unmaterialised future.
+
+To ship Emily as a first-class built-in profile in a future release,
+add a `def resolve(:emily) do ... end` clause that mirrors the `:emlx`
+clause but with `nx_backend: Emily.Backend` and the
+`override_default_margins/2` already applied. Phase 4 of the
+[Emily-validation response checklist](https://github.com/nshkrdotcom/trinity_coordinator)
+documents the rationale for keeping it validation-only for now.
+
 ## References
 
 - `TrinityCoordinator.RuntimeProfile` — the module that defines and

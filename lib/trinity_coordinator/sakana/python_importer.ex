@@ -10,6 +10,7 @@ defmodule TrinityCoordinator.Sakana.PythonImporter do
   """
 
   alias TrinityCoordinator.{Runtime, SLMProfile}
+  alias TrinityCoordinator.Runtime.BackendLabel
   alias TrinityCoordinator.Sakana.{Artifact, ExportSpec, SVD}
 
   @default_manifest "trinity_sakana_export_manifest.json"
@@ -496,10 +497,7 @@ defmodule TrinityCoordinator.Sakana.PythonImporter do
     Nx.backend_transfer(tensor, backend_from_label(Runtime.tensor_backend(target)))
   end
 
-  defp backend_from_label("EXLA.Backend<cuda" <> _), do: {EXLA.Backend, client: :cuda}
-  defp backend_from_label("EXLA.Backend<host" <> _), do: {EXLA.Backend, client: :host}
-  defp backend_from_label("Nx.BinaryBackend"), do: Nx.BinaryBackend
-  defp backend_from_label(_), do: Nx.BinaryBackend
+  defp backend_from_label(label), do: BackendLabel.from_label!(label)
 
   defp component_keys(entry) do
     explicit = entry.component_tensors || %{}

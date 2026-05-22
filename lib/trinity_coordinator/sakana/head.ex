@@ -7,6 +7,7 @@ defmodule TrinityCoordinator.Sakana.Head do
   """
 
   alias TrinityCoordinator.{CoordinationHead, Runtime}
+  alias TrinityCoordinator.Runtime.BackendLabel
 
   @routing_head_layer "routing_head"
 
@@ -165,10 +166,9 @@ defmodule TrinityCoordinator.Sakana.Head do
   defp maybe_transfer(tensor, backend), do: Nx.backend_transfer(tensor, backend)
 
   defp backend_from_tensor(tensor) do
-    case Runtime.tensor_backend(tensor) do
-      "EXLA.Backend<cuda" <> _ -> {EXLA.Backend, client: :cuda}
-      "EXLA.Backend<host" <> _ -> {EXLA.Backend, client: :host}
-      _ -> nil
+    case BackendLabel.from_label(Runtime.tensor_backend(tensor)) do
+      {:ok, backend_spec} -> backend_spec
+      {:error, _} -> nil
     end
   end
 

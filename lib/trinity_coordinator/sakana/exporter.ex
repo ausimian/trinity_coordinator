@@ -858,6 +858,15 @@ defmodule TrinityCoordinator.Sakana.Exporter do
     start = monotonic_us()
     decompose_source = decompose_source_tensor(tensor, mode)
     decomposition = SVD.decompose_tensor(decompose_source)
+
+    # Force materialization on lazy backends (EMLX / Emily) so that `elapsed`
+    # captures real SVD wall time instead of the host-side dispatch cost of a
+    # future. Backend-agnostic: cheap on already-eager backends (EXLA / Nx
+    # BinaryBackend) and unchanged-by-design on `decompose_source`. See
+    # `sync_tensor!/1` and the comment above it for the rationale.
+    sync_tensor!(decomposition.u)
+    sync_tensor!(decomposition.s)
+    sync_tensor!(decomposition.v)
     elapsed = elapsed_ms(start)
     {:ok, decomposition, elapsed, decompose_source}
   rescue
@@ -870,10 +879,31 @@ defmodule TrinityCoordinator.Sakana.Exporter do
   defp timed_reconstruct(decomposition, offsets, source_tensor) do
     start = monotonic_us()
     adapted = SVD.reconstruct(decomposition, offsets) |> Nx.as_type(Nx.type(source_tensor))
+    sync_tensor!(adapted)
     elapsed = elapsed_ms(start)
     {:ok, adapted, elapsed}
   rescue
     e -> {:error, {:reconstruct_error, Exception.message(e)}}
+  end
+
+  @doc false
+  # Backend-agnostic synchronization point.
+  #
+  # Lazy backends (EMLX, Emily) return futures from `Nx.LinAlg.svd/2` and only
+  # do real GPU work when something forces materialization. The exporter
+  # captures `decompose_elapsed_ms` / `reconstruct_elapsed_ms` by reading the
+  # monotonic clock immediately after the call returns; on a lazy backend that
+  # reads near-zero, which is what the original :emily / :emlx runs reported
+  # (`decompose_elapsed_ms: 2` for the {151_936, 1024} embedder).
+  #
+  # `Nx.to_number/1` on a 0-d scalar (the `Nx.sum/1` reduction) is the cheapest
+  # backend-agnostic force point that does not perturb EXLA — EXLA blocks the
+  # BEAM caller inside `svd/2` anyway, so the additional reduce + transfer is
+  # negligible. The tensor itself is returned unchanged so callers can pipe
+  # through it.
+  def sync_tensor!(%Nx.Tensor{} = tensor) do
+    _ = tensor |> Nx.sum() |> Nx.to_number()
+    tensor
   end
 
   defp ensure_export_backend(tensor, path, runtime_profile) do
